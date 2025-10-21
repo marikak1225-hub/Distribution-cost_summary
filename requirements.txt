@@ -1,5 +1,5 @@
+streamlit
 pandas
 openpyxl
-plotly
-kaleido
 xlsxwriter
+plotly

@@ -80,7 +80,7 @@ else:
             grouped.to_excel(writer, index=False, sheet_name="申込件数")
 
         # -------------------------
-        # 配信費集計（合計＋デイリー＋グラフ）
+        # 配信費集計（合計＋デイリー＋グラフ＋ピボット）
         # -------------------------
         if cost_file:
             st.subheader("配信費集計結果")
@@ -156,10 +156,15 @@ else:
                     st.subheader(f"{sheet} のデイリー集計結果")
                     # Excelダウンロードボタン（テーブル上部）
                     excel_buffer = BytesIO()
-                    daily_grouped.to_excel(excel_buffer, index=False, sheet_name="デイリー集計")
+                    with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as temp_writer:
+                        daily_grouped.to_excel(temp_writer, index=False, sheet_name="デイリー集計")
+                        # ピボット形式追加
+                        pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
+                        pivot_df.to_excel(temp_writer, sheet_name="デイリー_ピボット")
                     excel_buffer.seek(0)
+
                     st.download_button(
-                        label="📥 デイリー集計Excelをダウンロード",
+                        label="📥 デイリー集計Excel（ピボット付き）をダウンロード",
                         data=excel_buffer,
                         file_name=f"{sheet}_デイリー集計.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -171,7 +176,7 @@ else:
                     fig = px.line(daily_grouped, x="日付", y="金額", color="項目", title=f"{sheet} デイリー推移")
                     st.plotly_chart(fig, use_container_width=True)
 
-                    # グラフエクスポート（JSON形式）
+                    # グラフJSONダウンロード
                     graph_json = fig.to_json()
                     st.download_button(
                         label="📥 グラフデータ(JSON)をダウンロード",
