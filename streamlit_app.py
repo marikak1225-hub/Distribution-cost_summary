@@ -18,27 +18,22 @@ else:
     af_df = load_af_master(af_path)
     af_df.columns = ["AFコード", "媒体", "分類"]
 
-    # ファイルアップロード（横並び）
-    st.subheader("ファイルアップロード")
     col1, col2 = st.columns(2)
     with col1:
-        test_file = st.file_uploader("CVデータ（publicに変更）", type="xlsx", key="cv", accept_multiple_files=False)
+        test_file = st.file_uploader("CVデータ（publicに変更）", type="xlsx", key="cv")
     with col2:
-        cost_file = st.file_uploader("コストレポート（必要シート・必要行のみUP)", type="xlsx", key="cost", accept_multiple_files=False)
+        cost_file = st.file_uploader("コストレポート（必要シート・必要行のみUP)", type="xlsx", key="cost")
 
-    # 期間選択（1つのウィンドウ）
-    st.subheader("期間選択")
     start_date, end_date = st.date_input("集計期間を選択", value=(date(2025, 10, 1), date(2025, 10, 21)))
 
     if start_date > end_date:
         st.warning("⚠️ 開始日が終了日より後になっています。")
 
-    # ✅ 全集計Excel用バッファ
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
 
         # -------------------------
-        # CVデータ集計（期間中合計）
+        # CVデータ集計
         # -------------------------
         if test_file:
             st.subheader("申込データ集計結果")
@@ -69,7 +64,6 @@ else:
                 result_list.append({"広告コード": code, "媒体": media, "分類": category, "CV合計": cv_sum})
 
             grouped = pd.DataFrame(result_list).groupby(["分類", "媒体"], as_index=False)["CV合計"].sum()
-
             st.dataframe(grouped)
             grouped.to_excel(writer, index=False, sheet_name="申込件数")
 
@@ -106,16 +100,23 @@ else:
                 else:
                     columns_to_sum = {"AFF ALL": 20}
 
-                # デイリー集計
+                results = {}
                 daily_rows = []
                 for label, col_index in columns_to_sum.items():
                     try:
+                        total = filtered_df.iloc[:, col_index].sum()
+                        results[label] = total
                         temp_df = filtered_df[[filtered_df.columns[date_col_index], filtered_df.columns[col_index]]].copy()
                         temp_df.columns = ["日付", "金額"]
                         temp_df["項目"] = label
                         daily_rows.append(temp_df)
                     except Exception:
                         continue
+
+                # 合計テーブル表示
+                result_df = pd.DataFrame(results.items(), columns=["項目", "合計値"])
+                st.subheader(f"{sheet} の合計集計結果")
+                st.dataframe(result_df)
 
                 if daily_rows:
                     daily_df = pd.concat(daily_rows)
@@ -125,6 +126,8 @@ else:
 
                     # ピボット形式
                     pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
+                    st.subheader(f"{sheet} のピボット集計結果")
+                    st.dataframe(pivot_df)
                     pivot_sheets[sheet_type] = pivot_df
 
                     # 全集計Excelにもピボット追加
