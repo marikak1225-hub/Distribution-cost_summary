@@ -2,41 +2,48 @@ import streamlit as st
 import pandas as pd
 import os
 from io import BytesIO
+import plotly.express as px
+from datetime import date
 
+st.set_page_config(layout="wide")
 st.title("📊 期間中CV・配信費集計ツール")
 
-# AFマスター固定読み込み
+# AFマスター読み込み
 af_path = "AFマスター.xlsx"
 if not os.path.exists(af_path):
     st.error("AFマスター.xlsxがアプリフォルダにありません。配置してください。")
 else:
-    af_df = pd.read_excel(af_path, usecols="B:D", header=1)
+    af_df = pd.read_excel(af_path, usecols="B:D", header=1, engine="openpyxl")
     af_df.columns = ["AFコード", "媒体", "分類"]
 
-    # ファイルアップロード
+    # ファイルアップロード（横並び）
     st.subheader("ファイルアップロード")
-    test_file = st.file_uploader("CVデータ（publicに変更）", type="xlsx")
-    cost_file = st.file_uploader("コストレポート（必要シート・必要行のみUP)", type="xlsx")
+    col1, col2 = st.columns(2)
+    with col1:
+        test_file = st.file_uploader("CVデータ（publicに変更）", type="xlsx", key="cv")
+    with col2:
+        cost_file = st.file_uploader("コストレポート（必要シート・必要行のみUP)", type="xlsx", key="cost")
 
-    # 期間選択（共通）
+    # 期間選択（1つのウィンドウ）
     st.subheader("期間選択")
-    start_date = st.date_input("開始日")
-    end_date = st.date_input("終了日")
+    start_date, end_date = st.date_input("集計期間を選択", value=(date(2025, 10, 1), date(2025, 10, 21)))
 
     if start_date > end_date:
         st.warning("⚠️ 開始日が終了日より後になっています。")
 
-    # 集計結果格納
+    # ✅ ダウンロードボタン（テーブル上部に配置）
+    st.subheader("📥 集計結果のダウンロード")
+
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
 
         # -------------------------
-        # CVデータ集計（期間中合計のみ）
+        # CVデータ集計（期間中合計）
         # -------------------------
         if test_file:
             st.subheader("申込データ集計結果")
-            test_df = pd.read_excel(test_file, header=0)
-            test_df["日付"] = pd.to_datetime(test_df.iloc[:, 0], format="%Y%m%d")
+            test_df = pd.read_excel(test_file, header=0, engine="openpyxl")
+            test_df["日付"] = pd.to_datetime(test_df.iloc[:, 0], format="%Y%m%d", errors="coerce")
 
             filtered = test_df[
                 (test_df["日付"] >= pd.to_datetime(start_date)) &
@@ -68,12 +75,12 @@ else:
             grouped.to_excel(writer, index=False, sheet_name="申込件数")
 
         # -------------------------
-        # 配信費集計（合計＋デイリー）
+        # 配信費集計（合計＋デイリー＋グラフ）
         # -------------------------
         if cost_file:
             st.subheader("配信費集計結果")
             xls = pd.ExcelFile(cost_file)
-            target_sheets = [sheet for sheet in xls.sheet_names if any(key in sheet for key in ["Listing", "Display", "affiliate"])]
+            target_sheets = [s for s in xls.sheet_names if any(k in s for k in ["Listing", "Display", "affiliate"])]
 
             for sheet in target_sheets:
                 df = pd.read_excel(xls, sheet_name=sheet, engine="openpyxl")
@@ -115,7 +122,6 @@ else:
                         "AFF ALL": 20
                     }
 
-                # 合計集計
                 results = {}
                 daily_rows = []
                 for label, col_index in columns_to_sum.items():
@@ -139,16 +145,21 @@ else:
                 if daily_rows:
                     daily_df = pd.concat(daily_rows)
                     daily_grouped = daily_df.groupby(["日付", "項目"], as_index=False)["金額"].sum()
+                    daily_grouped["日付"] = pd.to_datetime(daily_grouped["日付"]).dt.strftime("%Y/%m/%d")
+
                     st.subheader(f"{sheet} のデイリー集計結果")
                     st.dataframe(daily_grouped)
+
+                    fig = px.line(daily_grouped, x="日付", y="金額", color="項目", title=f"{sheet} デイリー推移")
+                    st.plotly_chart(fig, use_container_width=True)
+
                     daily_sheet_name = sheet[:25] + "_デイリー"
                     daily_grouped.to_excel(writer, index=False, sheet_name=daily_sheet_name)
 
     output.seek(0)
 
-    # ✅ ダウンロードボタン（広告＋配信費まとめて）
     st.download_button(
-        label="📥 すべての集計結果をExcelでダウンロード",
+        label="Excelファイルをダウンロード",
         data=output,
         file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
