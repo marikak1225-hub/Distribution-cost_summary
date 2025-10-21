@@ -2,27 +2,29 @@ import streamlit as st
 import pandas as pd
 import os
 from io import BytesIO
-import plotly.express as px
 from datetime import date
 
 st.set_page_config(layout="wide")
 st.title("📊 期間中CV・配信費集計ツール")
 
-# AFマスター読み込み
+@st.cache_data
+def load_af_master(path):
+    return pd.read_excel(path, usecols="B:D", header=1, engine="openpyxl")
+
 af_path = "AFマスター.xlsx"
 if not os.path.exists(af_path):
     st.error("AFマスター.xlsxがアプリフォルダにありません。配置してください。")
 else:
-    af_df = pd.read_excel(af_path, usecols="B:D", header=1, engine="openpyxl")
+    af_df = load_af_master(af_path)
     af_df.columns = ["AFコード", "媒体", "分類"]
 
     # ファイルアップロード（横並び）
     st.subheader("ファイルアップロード")
     col1, col2 = st.columns(2)
     with col1:
-        test_file = st.file_uploader("CVデータ（publicに変更）", type="xlsx", key="cv")
+        test_file = st.file_uploader("CVデータ（publicに変更）", type="xlsx", key="cv", accept_multiple_files=False)
     with col2:
-        cost_file = st.file_uploader("コストレポート（必要シート・必要行のみUP)", type="xlsx", key="cost")
+        cost_file = st.file_uploader("コストレポート（必要シート・必要行のみUP)", type="xlsx", key="cost", accept_multiple_files=False)
 
     # 期間選択（1つのウィンドウ）
     st.subheader("期間選択")
@@ -31,6 +33,7 @@ else:
     if start_date > end_date:
         st.warning("⚠️ 開始日が終了日より後になっています。")
 
+    # ✅ 全集計Excel用バッファ
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
 
@@ -39,14 +42,6 @@ else:
         # -------------------------
         if test_file:
             st.subheader("申込データ集計結果")
-            # ダウンロードボタンをテーブル上部に配置
-            st.download_button(
-                label="📥 全集計Excelをダウンロード",
-                data=output,
-                file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
             test_df = pd.read_excel(test_file, header=0, engine="openpyxl")
             test_df["日付"] = pd.to_datetime(test_df.iloc[:, 0], format="%Y%m%d", errors="coerce")
 
@@ -73,15 +68,15 @@ else:
                 cv_sum = filtered[code].sum()
                 result_list.append({"広告コード": code, "媒体": media, "分類": category, "CV合計": cv_sum})
 
-            result_df = pd.DataFrame(result_list)
-            grouped = result_df.groupby(["分類", "媒体"], as_index=False)["CV合計"].sum()
+            grouped = pd.DataFrame(result_list).groupby(["分類", "媒体"], as_index=False)["CV合計"].sum()
 
             st.dataframe(grouped)
             grouped.to_excel(writer, index=False, sheet_name="申込件数")
 
         # -------------------------
-        # 配信費集計（合計＋デイリー＋グラフ＋ピボット）
+        # 配信費集計（合計＋ピボットまとめ）
         # -------------------------
+        pivot_sheets = {}
         if cost_file:
             st.subheader("配信費集計結果")
             xls = pd.ExcelFile(cost_file)
@@ -89,7 +84,7 @@ else:
 
             for sheet in target_sheets:
                 df = pd.read_excel(xls, sheet_name=sheet, engine="openpyxl")
-                sheet_type = "Listing" if "Listing" in sheet else "Display" if "Display" in sheet else "affiliate"
+                sheet_type = "Listing" if "Listing" in sheet else "Display" if "Display" in sheet else "Affiliate"
                 date_col_index = 1 if sheet_type in ["Listing", "Display"] else 0
 
                 df.iloc[:, date_col_index] = pd.to_datetime(df.iloc[:, date_col_index], errors='coerce')
@@ -100,92 +95,60 @@ else:
 
                 if sheet_type == "Listing":
                     columns_to_sum = {
-                        "Listing ALL": 17,
-                        "Google単体": 53,
-                        "Google単体以外": 89,
-                        "Googleその他": 125,
-                        "Yahoo単体": 161,
-                        "Yahoo単体以外": 197,
-                        "Microsoft単体": 233,
-                        "Microsoft単体以外": 269
+                        "Listing ALL": 17, "Google単体": 53, "Google単体以外": 89, "Googleその他": 125,
+                        "Yahoo単体": 161, "Yahoo単体以外": 197, "Microsoft単体": 233, "Microsoft単体以外": 269
                     }
                 elif sheet_type == "Display":
                     columns_to_sum = {
-                        "Display ALL": 17,
-                        "Meta": 53,
-                        "X": 89,
-                        "LINE": 125,
-                        "YDA": 161,
-                        "TTD": 199,
-                        "TikTok": 235,
-                        "GDN": 271,
-                        "CRITEO": 307,
-                        "RUNA": 343
+                        "Display ALL": 17, "Meta": 53, "X": 89, "LINE": 125, "YDA": 161,
+                        "TTD": 199, "TikTok": 235, "GDN": 271, "CRITEO": 307, "RUNA": 343
                     }
-                elif sheet_type == "affiliate":
-                    columns_to_sum = {
-                        "AFF ALL": 20
-                    }
+                else:
+                    columns_to_sum = {"AFF ALL": 20}
 
-                results = {}
+                # デイリー集計
                 daily_rows = []
                 for label, col_index in columns_to_sum.items():
                     try:
-                        total = filtered_df.iloc[:, col_index].sum()
-                        results[label] = total
-
                         temp_df = filtered_df[[filtered_df.columns[date_col_index], filtered_df.columns[col_index]]].copy()
                         temp_df.columns = ["日付", "金額"]
                         temp_df["項目"] = label
                         daily_rows.append(temp_df)
                     except Exception:
-                        results[label] = "エラー"
+                        continue
 
-                result_df = pd.DataFrame(results.items(), columns=["項目", "合計値"])
-                st.subheader(f"{sheet} の合計集計結果")
-                st.dataframe(result_df)
-                result_df.to_excel(writer, index=False, sheet_name=sheet[:31])
-
-                # デイリー集計
                 if daily_rows:
                     daily_df = pd.concat(daily_rows)
                     daily_grouped = daily_df.groupby(["日付", "項目"], as_index=False)["金額"].sum()
                     daily_grouped["日付"] = pd.to_datetime(daily_grouped["日付"]).dt.strftime("%Y/%m/%d")
                     daily_grouped = daily_grouped.sort_values(by=["項目", "日付"])
 
-                    st.subheader(f"{sheet} のデイリー集計結果")
-                    # Excelダウンロードボタン（テーブル上部）
-                    excel_buffer = BytesIO()
-                    with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as temp_writer:
-                        daily_grouped.to_excel(temp_writer, index=False, sheet_name="デイリー集計")
-                        # ピボット形式追加
-                        pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
-                        pivot_df.to_excel(temp_writer, sheet_name="デイリー_ピボット")
-                    excel_buffer.seek(0)
+                    # ピボット形式
+                    pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
+                    pivot_sheets[sheet_type] = pivot_df
 
-                    st.download_button(
-                        label="📥 デイリー集計Excel（ピボット付き）をダウンロード",
-                        data=excel_buffer,
-                        file_name=f"{sheet}_デイリー集計.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+                    # 全集計Excelにもピボット追加
+                    pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_ピボット")
 
-                    st.dataframe(daily_grouped)
+            # ✅ ピボットまとめExcel
+            if pivot_sheets:
+                pivot_output = BytesIO()
+                with pd.ExcelWriter(pivot_output, engine="xlsxwriter") as pivot_writer:
+                    for name, df in pivot_sheets.items():
+                        df.to_excel(pivot_writer, sheet_name=name)
+                pivot_output.seek(0)
 
-                    # グラフ表示（Plotly）
-                    fig = px.line(daily_grouped, x="日付", y="金額", color="項目", title=f"{sheet} デイリー推移")
-                    st.plotly_chart(fig, use_container_width=True)
-
-                    # グラフJSONダウンロード
-                    graph_json = fig.to_json()
-                    st.download_button(
-                        label="📥 グラフデータ(JSON)をダウンロード",
-                        data=graph_json,
-                        file_name=f"{sheet}_daily_chart.json",
-                        mime="application/json"
-                    )
-
-                    daily_sheet_name = sheet[:25] + "_デイリー"
-                    daily_grouped.to_excel(writer, index=False, sheet_name=daily_sheet_name)
+                st.download_button(
+                    label="📥 デイリー集計ピボットまとめExcelをダウンロード",
+                    data=pivot_output,
+                    file_name=f"デイリー集計_ピボットまとめ.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
     output.seek(0)
+    st.download_button(
+        label="📥 全集計Excelをダウンロード",
+        data=output,
+        file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
