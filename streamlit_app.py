@@ -31,9 +31,6 @@ else:
     if start_date > end_date:
         st.warning("⚠️ 開始日が終了日より後になっています。")
 
-    # ✅ ダウンロードボタン（テーブル上部に配置）
-    st.subheader("📥 集計結果のダウンロード")
-
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
 
@@ -42,6 +39,14 @@ else:
         # -------------------------
         if test_file:
             st.subheader("申込データ集計結果")
+            # ダウンロードボタンをテーブル上部に配置
+            st.download_button(
+                label="📥 全集計Excelをダウンロード",
+                data=output,
+                file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
             test_df = pd.read_excel(test_file, header=0, engine="openpyxl")
             test_df["日付"] = pd.to_datetime(test_df.iloc[:, 0], format="%Y%m%d", errors="coerce")
 
@@ -146,12 +151,10 @@ else:
                     daily_df = pd.concat(daily_rows)
                     daily_grouped = daily_df.groupby(["日付", "項目"], as_index=False)["金額"].sum()
                     daily_grouped["日付"] = pd.to_datetime(daily_grouped["日付"]).dt.strftime("%Y/%m/%d")
-
-                    # 項目順→日付順で並び替え
                     daily_grouped = daily_grouped.sort_values(by=["項目", "日付"])
 
                     st.subheader(f"{sheet} のデイリー集計結果")
-                    # ダウンロードボタンをテーブル上部に配置
+                    # Excelダウンロードボタン（テーブル上部）
                     excel_buffer = BytesIO()
                     daily_grouped.to_excel(excel_buffer, index=False, sheet_name="デイリー集計")
                     excel_buffer.seek(0)
@@ -164,28 +167,20 @@ else:
 
                     st.dataframe(daily_grouped)
 
-                    # グラフ表示
+                    # グラフ表示（Plotly）
                     fig = px.line(daily_grouped, x="日付", y="金額", color="項目", title=f"{sheet} デイリー推移")
                     st.plotly_chart(fig, use_container_width=True)
 
-                    # グラフ画像エクスポート
-                    fig.write_image(f"{sheet}_daily_chart.png")
-                    with open(f"{sheet}_daily_chart.png", "rb") as img_file:
-                        st.download_button(
-                            label="📥 グラフ画像をダウンロード",
-                            data=img_file,
-                            file_name=f"{sheet}_daily_chart.png",
-                            mime="image/png"
-                        )
+                    # グラフエクスポート（JSON形式）
+                    graph_json = fig.to_json()
+                    st.download_button(
+                        label="📥 グラフデータ(JSON)をダウンロード",
+                        data=graph_json,
+                        file_name=f"{sheet}_daily_chart.json",
+                        mime="application/json"
+                    )
 
                     daily_sheet_name = sheet[:25] + "_デイリー"
                     daily_grouped.to_excel(writer, index=False, sheet_name=daily_sheet_name)
 
     output.seek(0)
-
-    st.download_button(
-        label="📥 全集計Excelをダウンロード",
-        data=output,
-        file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
