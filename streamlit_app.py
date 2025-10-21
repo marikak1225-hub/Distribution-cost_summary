@@ -67,12 +67,20 @@ else:
             st.dataframe(grouped)
             grouped.to_excel(writer, index=False, sheet_name="申込件数")
 
+            # ✅ 全集計Excelダウンロードボタンをここに配置
+            output.seek(0)
+            st.download_button(
+                label="📥 全集計Excelをダウンロード",
+                data=output,
+                file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
         # -------------------------
-        # 配信費集計（合計＋ピボットまとめ）
+        # 配信費集計（ピボットのみ表示）
         # -------------------------
-        pivot_sheets = {}
         if cost_file:
-            st.subheader("配信費集計結果")
+            st.subheader("配信費ピボット集計結果")
             xls = pd.ExcelFile(cost_file)
             target_sheets = [s for s in xls.sheet_names if any(k in s for k in ["Listing", "Display", "affiliate"])]
 
@@ -100,12 +108,9 @@ else:
                 else:
                     columns_to_sum = {"AFF ALL": 20}
 
-                results = {}
                 daily_rows = []
                 for label, col_index in columns_to_sum.items():
                     try:
-                        total = filtered_df.iloc[:, col_index].sum()
-                        results[label] = total
                         temp_df = filtered_df[[filtered_df.columns[date_col_index], filtered_df.columns[col_index]]].copy()
                         temp_df.columns = ["日付", "金額"]
                         temp_df["項目"] = label
@@ -113,45 +118,15 @@ else:
                     except Exception:
                         continue
 
-                # 合計テーブル表示
-                result_df = pd.DataFrame(results.items(), columns=["項目", "合計値"])
-                st.subheader(f"{sheet} の合計集計結果")
-                st.dataframe(result_df)
-
                 if daily_rows:
                     daily_df = pd.concat(daily_rows)
                     daily_grouped = daily_df.groupby(["日付", "項目"], as_index=False)["金額"].sum()
                     daily_grouped["日付"] = pd.to_datetime(daily_grouped["日付"]).dt.strftime("%Y/%m/%d")
                     daily_grouped = daily_grouped.sort_values(by=["項目", "日付"])
 
-                    # ピボット形式
                     pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
                     st.subheader(f"{sheet} のピボット集計結果")
                     st.dataframe(pivot_df)
-                    pivot_sheets[sheet_type] = pivot_df
 
                     # 全集計Excelにもピボット追加
                     pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_ピボット")
-
-            # ✅ ピボットまとめExcel
-            if pivot_sheets:
-                pivot_output = BytesIO()
-                with pd.ExcelWriter(pivot_output, engine="xlsxwriter") as pivot_writer:
-                    for name, df in pivot_sheets.items():
-                        df.to_excel(pivot_writer, sheet_name=name)
-                pivot_output.seek(0)
-
-                st.download_button(
-                    label="📥 デイリー集計ピボットまとめExcelをダウンロード",
-                    data=pivot_output,
-                    file_name=f"デイリー集計_ピボットまとめ.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-
-    output.seek(0)
-    st.download_button(
-        label="📥 全集計Excelをダウンロード",
-        data=output,
-        file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
