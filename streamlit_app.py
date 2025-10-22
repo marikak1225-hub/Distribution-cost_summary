@@ -67,7 +67,7 @@ else:
             st.dataframe(grouped)
             grouped.to_excel(writer, index=False, sheet_name="申込件数")
 
-            # ✅ 全集計Excelダウンロードボタンをここに配置
+            # ✅ 全集計Excelダウンロードボタン
             output.seek(0)
             st.download_button(
                 label="📥 全集計Excelをダウンロード",
@@ -77,10 +77,10 @@ else:
             )
 
         # -------------------------
-        # 配信費集計（ピボットのみ表示）
+        # 配信費集計（ピボットの表示）
         # -------------------------
         if cost_file:
-            st.subheader("配信費ピボット集計結果")
+            st.subheader("配信費集計結果")
             xls = pd.ExcelFile(cost_file)
             target_sheets = [s for s in xls.sheet_names if any(k in s for k in ["Listing", "Display", "affiliate"])]
 
@@ -125,8 +125,8 @@ else:
                     daily_grouped = daily_grouped.sort_values(by=["項目", "日付"])
 
                     pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
-                    st.subheader(f"{sheet} のピボット集計結果")
+                    st.subheader(f"{sheet} の集計結果")
                     st.dataframe(pivot_df)
 
-                    # 全集計Excelにもピボット追加
-                    pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_ピボット")
+                    # 全集計Excelにピボット追加
+                    pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_集計")
