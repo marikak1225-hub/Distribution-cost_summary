@@ -3,6 +3,7 @@ import pandas as pd
 import os
 from io import BytesIO
 from datetime import date
+import altair as alt
 
 st.set_page_config(layout="wide")
 st.title("📊 期間中CV・配信費集計ツール")
@@ -67,17 +68,8 @@ else:
             st.dataframe(grouped)
             grouped.to_excel(writer, index=False, sheet_name="申込件数")
 
-            # ✅ 全集計Excelダウンロードボタン
-            output.seek(0)
-            st.download_button(
-                label="📥 全集計Excelをダウンロード",
-                data=output,
-                file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
         # -------------------------
-        # 配信費集計（ピボットの表示）
+        # 配信費集計（ピボットの表示＋グラフ）
         # -------------------------
         if cost_file:
             st.subheader("配信費集計結果")
@@ -126,7 +118,26 @@ else:
 
                     pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
                     st.subheader(f"{sheet} の集計結果")
-                    st.dataframe(pivot_df)
 
-                    # 全集計Excelにピボット追加
+                    col_table, col_chart = st.columns([1, 1.5])
+                    with col_table:
+                        st.dataframe(pivot_df)
+
+                    with col_chart:
+                        chart = alt.Chart(daily_grouped).mark_line().encode(
+                            x="日付:T",
+                            y="金額:Q",
+                            color="項目:N"
+                        ).properties(width=500, height=300)
+                        st.altair_chart(chart, use_container_width=True)
+
                     pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_集計")
+
+    # ✅ ダウンロードボタンは ExcelWriter の外に配置
+    output.seek(0)
+    st.download_button(
+        label="📥 全集計Excelをダウンロード",
+        data=output.getvalue(),
+        file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
