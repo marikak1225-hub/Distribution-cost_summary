@@ -73,6 +73,16 @@ else:
         # -------------------------
         if cost_file:
             st.subheader("配信費集計結果")
+
+            # ✅ ダウンロードボタンをここに配置
+            output.seek(0)
+            st.download_button(
+                label="📥 全集計Excelをダウンロード",
+                data=output.getvalue(),
+                file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
             xls = pd.ExcelFile(cost_file)
             target_sheets = [s for s in xls.sheet_names if any(k in s for k in ["Listing", "Display", "affiliate"])]
 
@@ -129,6 +139,9 @@ else:
                         ordered_cols = [col for col in desired_order if col in pivot_df.columns]
                         pivot_df = pivot_df[ordered_cols]
 
+                    # ✅ 合計行を追加
+                    pivot_df.loc["合計"] = pivot_df.sum(numeric_only=True)
+
                     st.subheader(f"{sheet} の集計結果")
                     col_table, col_chart = st.columns([1, 1.5])
                     with col_table:
@@ -143,12 +156,3 @@ else:
                         st.altair_chart(chart, use_container_width=True)
 
                     pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_集計")
-
-    # ✅ ダウンロードボタンは ExcelWriter の外に配置
-    output.seek(0)
-    st.download_button(
-        label="📥 全集計Excelをダウンロード",
-        data=output.getvalue(),
-        file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
