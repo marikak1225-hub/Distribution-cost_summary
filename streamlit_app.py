@@ -139,8 +139,9 @@ else:
                         ordered_cols = [col for col in desired_order if col in pivot_df.columns]
                         pivot_df = pivot_df[ordered_cols]
 
-                    # ✅ 合計行を追加
-                    pivot_df.loc["合計"] = pivot_df.sum(numeric_only=True)
+                    # ✅ 合計行を追加（列がある場合のみ）
+                    if not pivot_df.empty and len(pivot_df.columns) > 0:
+                        pivot_df.loc["合計"] = pivot_df.sum(numeric_only=True)
 
                     st.subheader(f"{sheet} の集計結果")
                     col_table, col_chart = st.columns([1, 1.5])
