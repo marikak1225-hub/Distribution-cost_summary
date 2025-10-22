@@ -69,7 +69,7 @@ else:
             grouped.to_excel(writer, index=False, sheet_name="申込件数")
 
         # -------------------------
-        # 配信費集計（ピボットの表示＋グラフ）
+        # 配信費集計（ピボット＋グラフ）
         # -------------------------
         if cost_file:
             st.subheader("配信費集計結果")
@@ -92,13 +92,19 @@ else:
                         "Listing ALL": 17, "Google単体": 53, "Google単体以外": 89, "Googleその他": 125,
                         "Yahoo単体": 161, "Yahoo単体以外": 197, "Microsoft単体": 233, "Microsoft単体以外": 269
                     }
+                    desired_order = [
+                        "Listing ALL", "Googleその他", "Google単体", "Google単体以外",
+                        "Yahoo単体", "Yahoo単体以外", "Microsoft単体", "Microsoft単体以外"
+                    ]
                 elif sheet_type == "Display":
                     columns_to_sum = {
                         "Display ALL": 17, "Meta": 53, "X": 89, "LINE": 125, "YDA": 161,
                         "TTD": 199, "TikTok": 235, "GDN": 271, "CRITEO": 307, "RUNA": 343
                     }
+                    desired_order = None
                 else:
                     columns_to_sum = {"AFF ALL": 20}
+                    desired_order = None
 
                 daily_rows = []
                 for label, col_index in columns_to_sum.items():
@@ -117,8 +123,13 @@ else:
                     daily_grouped = daily_grouped.sort_values(by=["項目", "日付"])
 
                     pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
-                    st.subheader(f"{sheet} の集計結果")
 
+                    # 並び順の指定（Listingのみ）
+                    if desired_order:
+                        ordered_cols = [col for col in desired_order if col in pivot_df.columns]
+                        pivot_df = pivot_df[ordered_cols]
+
+                    st.subheader(f"{sheet} の集計結果")
                     col_table, col_chart = st.columns([1, 1.5])
                     with col_table:
                         st.dataframe(pivot_df)
