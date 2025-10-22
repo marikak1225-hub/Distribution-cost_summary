@@ -74,15 +74,6 @@ else:
         if cost_file:
             st.subheader("配信費集計結果")
 
-            # ✅ ダウンロードボタンをここに配置
-            output.seek(0)
-            st.download_button(
-                label="📥 全集計Excelをダウンロード",
-                data=output.getvalue(),
-                file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
             xls = pd.ExcelFile(cost_file)
             target_sheets = [s for s in xls.sheet_names if any(k in s for k in ["Listing", "Display", "affiliate"])]
 
@@ -134,12 +125,11 @@ else:
 
                     pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
 
-                    # 並び順の指定（Listingのみ）
                     if desired_order:
                         ordered_cols = [col for col in desired_order if col in pivot_df.columns]
                         pivot_df = pivot_df[ordered_cols]
 
-                    # ✅ 合計行を追加（列がある場合のみ）
+                    # ✅ 合計行を追加（空でない場合のみ）
                     if not pivot_df.empty and len(pivot_df.columns) > 0:
                         pivot_df.loc["合計"] = pivot_df.sum(numeric_only=True)
 
@@ -157,3 +147,14 @@ else:
                         st.altair_chart(chart, use_container_width=True)
 
                     pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_集計")
+
+    # ✅ ExcelWriterの外でseek(0)を呼び出す
+    output.seek(0)
+
+    # ✅ ダウンロードボタンを最終的に表示
+    st.download_button(
+        label="📥 全集計Excelをダウンロード",
+        data=output.getvalue(),
+        file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
