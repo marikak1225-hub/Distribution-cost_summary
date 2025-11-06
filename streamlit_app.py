@@ -196,7 +196,7 @@ for col in ["AFF変化率", "AFFCPA変化率", "SEM変化率", "SEMCPA変化率"
 
 # ✅ 正しい順序でソート
 week_order = sorted(
-    all_section["週"].dropna().unique(),
+    all_section["週"].dropna().unique().tolist(),
     key=lambda x: int(re.search(r"\d+", x).group()) if re.search(r"\d+", x) else 0
 )
 
