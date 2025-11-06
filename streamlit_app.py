@@ -146,7 +146,28 @@ st.download_button("📥 全集計Excelをダウンロード", data=output.getva
                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # -------------------------
-# 領域別コンディション分析セクション
+# Affiliate専用表示（テーブル＋グラフ横並び）
+# -------------------------
+affiliate_result = next((df for sheet_type, df in cost_results if sheet_type == "Affiliate"), None)
+if affiliate_result is not None:
+    st.subheader("2025年11月度 (Affiliate) 集計結果")
+    col_table, col_chart = st.columns([1, 1.5])
+
+    with col_table:
+        st.dataframe(affiliate_result)
+
+    affiliate_long = affiliate_result.reset_index().melt(id_vars="日付", var_name="項目", value_name="金額")
+    chart = alt.Chart(affiliate_long).mark_line(point=True).encode(
+        x="日付:T",
+        y="金額:Q",
+        color="項目:N"
+    ).properties(title="Affiliate 配信費推移", width=500, height=300)
+
+    with col_chart:
+        st.altair_chart(chart, use_container_width=True)
+
+# -------------------------
+# 領域別コンディション分析（グラフ①削除済み）
 # -------------------------
 st.header("📈 領域別コンディション分析")
 condition_path = "領域別コンディション.xlsx"
@@ -169,18 +190,7 @@ for col in ["AFF変化率", "AFFCPA変化率", "SEM変化率", "SEMCPA変化率"
 
 week_order = sorted(all_section["週"].dropna().unique(), key=lambda x: int(x.replace("移管後", "").replace("W", "")))
 
-# グラフ①
-st.altair_chart(
-    alt.layer(
-        alt.Chart(aff_sem_section).mark_area(opacity=0.4, color="steelblue").encode(x=alt.X("AFF_週:N", sort=week_order), y="AFF件数:Q"),
-        alt.Chart(aff_sem_section).mark_area(opacity=0.4, color="green").encode(x="AFF_週:N", y="SEM件数:Q"),
-        alt.Chart(aff_sem_section).mark_line(color="blue").encode(x="AFF_週:N", y=alt.Y("AFF変化率:Q", axis=alt.Axis(title="変化率", format=".1%"))),
-        alt.Chart(aff_sem_section).mark_line(color="darkgreen").encode(x="AFF_週:N", y=alt.Y("SEM変化率:Q", axis=alt.Axis(format=".1%")))
-    ).resolve_scale(y='independent').properties(title="グラフ①: AFF・SEM 件数 + 変化率"),
-    use_container_width=True
-)
-
-# セレクトボックス
+# ✅ グラフ①削除済み → セレクトボックスのみ残す
 option = st.selectbox("表示する領域", ["全体", "AFF", "SEM"])
 if option == "全体":
     col1, col2 = st.columns(2)
