@@ -126,12 +126,8 @@ if cost_file:
             daily_grouped["日付"] = pd.to_datetime(daily_grouped["日付"]).dt.strftime("%Y/%m/%d")
 
             pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
-            st.subheader(f"{sheet} の集計結果")
-            st.dataframe(pivot_df)
 
-            chart = alt.Chart(daily_grouped).mark_line().encode(x="日付:T", y="金額:Q", color="項目:N")
-            st.altair_chart(chart, use_container_width=True)
-
+            # ✅ 縦並び表示は削除
             cost_results.append((sheet_type, pivot_df))
 
 # Excel出力
@@ -146,7 +142,7 @@ st.download_button("📥 全集計Excelをダウンロード", data=output.getva
                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # -------------------------
-# Affiliate専用表示（テーブル＋グラフ横並び）
+# Affiliate専用横並び表示のみ残す
 # -------------------------
 affiliate_result = next((df for sheet_type, df in cost_results if sheet_type == "Affiliate"), None)
 if affiliate_result is not None:
