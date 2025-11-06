@@ -5,9 +5,13 @@ from io import BytesIO
 from datetime import date
 import altair as alt
 
+# Streamlit page config
 st.set_page_config(layout="wide")
-st.title("📊 期間中CV・配信費集計ツール")
+st.title("📊 期間中CV・配信費集計ツール + 領域別コンディション分析")
 
+# -------------------------
+# AFマスター読み込み
+# -------------------------
 @st.cache_data
 def load_af_master(path):
     return pd.read_excel(path, usecols="B:D", header=1, engine="openpyxl")
@@ -19,6 +23,9 @@ else:
     af_df = load_af_master(af_path)
     af_df.columns = ["AFコード", "媒体", "分類"]
 
+    # -------------------------
+    # ファイルアップロード
+    # -------------------------
     col1, col2 = st.columns(2)
     with col1:
         test_file = st.file_uploader("CVデータ（publicに変更）", type="xlsx", key="cv")
@@ -46,7 +53,8 @@ else:
                 (test_df["日付"] <= pd.to_datetime(end_date))
             ]
 
-            mapping = af_df.set_index("AFコード")[["媒体", "分類"]].to_dict("index")
+            mapping = af_df.set_index("AFコード")["媒体"].to_dict()
+            mapping_cat = af_df.set_index("AFコード")["分類"].to_dict()
             ad_codes = test_df.columns[1:]
             affiliate_prefixes = ["GEN", "AFA", "AFP", "RAA"]
 
@@ -56,8 +64,8 @@ else:
                     media = "Affiliate"
                     category = "Affiliate"
                 elif code in mapping:
-                    media = mapping[code]["媒体"]
-                    category = mapping[code]["分類"]
+                    media = mapping[code]
+                    category = mapping_cat[code]
                 else:
                     continue
 
@@ -120,7 +128,7 @@ else:
                 if daily_rows:
                     daily_df = pd.concat(daily_rows)
                     daily_grouped = daily_df.groupby(["日付", "項目"], as_index=False)["金額"].sum()
-                    daily_grouped["日付"] = pd.to_datetime(daily_grouped["日付"]).dt.strftime("%Y/%m/%d")
+                    daily_grouped["日付"] = pd.to_datetime(daily_grouped["日付"])
                     daily_grouped = daily_grouped.sort_values(by=["項目", "日付"])
 
                     pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
@@ -129,7 +137,6 @@ else:
                         ordered_cols = [col for col in desired_order if col in pivot_df.columns]
                         pivot_df = pivot_df[ordered_cols]
 
-                    # ✅ 合計行を追加（空でない場合のみ）
                     if not pivot_df.empty and len(pivot_df.columns) > 0:
                         pivot_df.loc["合計"] = pivot_df.sum(numeric_only=True)
 
@@ -148,16 +155,53 @@ else:
 
                     pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_集計")
 
-    # ✅ ExcelWriterの外でseek(0)を呼び出す
+    # ExcelWriterの外でseek(0)
     output.seek(0)
 
-    # ✅ ダウンロードボタンを最終的に表示
     st.download_button(
         label="📥 全集計Excelをダウンロード",
         data=output.getvalue(),
         file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-    st.plotly_chart(fig_cv, use_container_width=True)
-st.plotly_chart(fig_cost, use_container_width=True)
-st.plotly_chart(fig_cpa, use_container_width=True)
+
+# -------------------------
+# 領域別コンディション分析
+# -------------------------
+st.subheader("📈 領域別コンディション分析")
+condition_path = "領域別コンディション.xlsx"
+if os.path.exists(condition_path):
+    cond_df = pd.read_excel(condition_path, sheet_name="領域別コンディション", header=None)
+
+    # ALLデータ抽出
+    all_section = cond_df.iloc[4:30, [1, 2, 3, 5, 7]]
+    all_section.columns = ["週", "期間", "件数", "広告費", "CPA"]
+    all_section["分類"] = "ALL"
+
+    # AFF & SEMデータ抽出
+    aff_sem_section = cond_df.iloc[33:59, [1, 2, 3, 5, 7, 9, 10, 11, 13, 15]]
+    aff_sem_section.columns = ["AFF_週", "AFF_期間", "AFF_件数", "AFF_広告費", "AFF_CPA",
+                                "SEM_週", "SEM_期間", "SEM_件数", "SEM_広告費", "SEM_CPA"]
+
+    melted_aff = aff_sem_section[["AFF_週", "AFF_件数", "AFF_広告費", "AFF_CPA"]].copy()
+    melted_aff.columns = ["週", "件数", "広告費", "CPA"]
+    melted_aff["分類"] = "AFF"
+
+    melted_sem = aff_sem_section[["SEM_週", "SEM_件数", "SEM_広告費", "SEM_CPA"]].copy()
+    melted_sem.columns = ["週", "件数", "広告費", "CPA"]
+    melted_sem["分類"] = "SEM"
+
+    final_df = pd.concat([all_section, melted_aff, melted_sem])
+    for col in ["件数", "広告費", "CPA"]:
+        final_df[col] = pd.to_numeric(final_df[col], errors="coerce")
+
+    metric = st.selectbox("表示する指標を選択", ["件数", "広告費", "CPA"])
+    chart = alt.Chart(final_df).mark_line(point=True).encode(
+        x="週:N",
+        y=alt.Y(metric, title=metric),
+        color="分類:N"
+    ).properties(width=700, height=400)
+
+    st.altair_chart(chart, use_container_width=True)
+else:
+    st.warning("領域別コンディション.xlsxが見つかりません。GitHubに追加してください。")
