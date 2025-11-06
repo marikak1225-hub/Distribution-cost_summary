@@ -34,14 +34,6 @@ with col2:
 default_start = date.today()
 default_end = date.today()
 
-# ファイルアップロード後に更新
-if test_file:
-    test_df = pd.read_excel(test_file, header=0, engine="openpyxl")
-    test_df["日付"] = pd.to_datetime(test_df.iloc[:, 0], errors="coerce")
-    if not test_df["日付"].isna().all():
-        default_start = test_df["日付"].min().date()
-        default_end = test_df["日付"].max().date()
-
 # date_inputに反映
 start_date, end_date = st.date_input(
     "集計期間を選択",
