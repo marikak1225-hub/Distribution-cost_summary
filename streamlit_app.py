@@ -6,7 +6,7 @@ from datetime import date
 
 # ページ設定
 st.set_page_config(layout="wide")
-st.title("📊 期間中CV・配信費集計ツール + 領域別コンディション分析")
+st.title("📊 期間中CV・配信費集計ツール ")
 
 # -------------------------
 # AFマスター読み込み（クラウド固定）
@@ -28,7 +28,7 @@ col1, col2 = st.columns(2)
 with col1:
     test_file = st.file_uploader("CVデータ（publicに変更）", type="xlsx", key="cv")
 with col2:
-    cost_file = st.file_uploader("コストレポート（必要シート・必要行のみUP)", type="xlsx", key="cost")
+    cost_file = st.file_uploader("コストレポート（パスワード解除、必要シート・必要行のみUP)", type="xlsx", key="cost")
 
 # コストレポートからデフォルト期間取得
 default_start = date.today()
@@ -61,7 +61,7 @@ if test_file:
     st.subheader("申込データ集計結果")
     test_df = pd.read_excel(test_file, header=0, engine="openpyxl")
 
-    # ✅ 日付フォーマットをYYYYMMDD固定で変換
+    # ✅ 日付フォーマットをYYYYMMDD変換
     test_df["日付"] = pd.to_datetime(test_df.iloc[:, 0], format="%Y%m%d", errors="coerce")
 
     filtered = test_df[(test_df["日付"] >= pd.to_datetime(start_date)) & (test_df["日付"] <= pd.to_datetime(end_date))]
@@ -129,7 +129,6 @@ if cost_file:
 
             cost_results.append((sheet_type, pivot_df))
 
-            # ✅ ListingとDisplayは縦並び表示を復活
             if sheet_type in ["Listing", "Display"]:
                 st.subheader(f"{sheet_type} の集計結果")
                 col_table, col_chart = st.columns([1, 1.5])
@@ -140,17 +139,6 @@ if cost_file:
                         x="日付:T", y="金額:Q", color="項目:N"
                     ).properties(title=f"{sheet_type} 配信費推移", width=500, height=300)
                     st.altair_chart(chart, use_container_width=True)
-
-# Excel出力
-with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-    if cv_result is not None:
-        cv_result.to_excel(writer, index=False, sheet_name="申込件数")
-    for sheet_type, pivot_df in cost_results:
-        pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_集計")
-
-st.download_button("📥 全集計Excelをダウンロード", data=output.getvalue(),
-                   file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
-                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # -------------------------
 # Affiliate専用横並び表示のみ残す
@@ -172,6 +160,17 @@ if affiliate_result is not None:
 
     with col_chart:
         st.altair_chart(chart, use_container_width=True)
+
+# Excelエクスポート
+with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+    if cv_result is not None:
+        cv_result.to_excel(writer, index=False, sheet_name="申込件数")
+    for sheet_type, pivot_df in cost_results:
+        pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_集計")
+
+st.download_button("📥 全集計Excelをダウンロード", data=output.getvalue(),
+                   file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
+                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # -------------------------
 # 領域別コンディション分析（グラフ①削除済み）
@@ -197,7 +196,7 @@ for col in ["AFF変化率", "AFFCPA変化率", "SEM変化率", "SEMCPA変化率"
 
 week_order = sorted(all_section["週"].dropna().unique(), key=lambda x: int(x.replace("移管後", "").replace("W", "")))
 
-# ✅ グラフ①削除済み → セレクトボックスのみ残す
+# セレクトボックス
 option = st.selectbox("表示する領域", ["全体", "AFF", "SEM"])
 if option == "全体":
     col1, col2 = st.columns(2)
@@ -206,7 +205,7 @@ if option == "全体":
             alt.layer(
                 alt.Chart(all_section).mark_bar(color="steelblue").encode(x=alt.X("週:N", sort=week_order), y="件数:Q"),
                 alt.Chart(all_section).mark_line(color="orange").encode(x="週:N", y=alt.Y("変化率:Q", axis=alt.Axis(format=".1%")))
-            ).resolve_scale(y='independent').properties(title="グラフ②: CV ALL 件数 + 変化率"),
+            ).resolve_scale(y='independent').properties(title="CV ALL 件数 + 変化率"),
             use_container_width=True
         )
     with col2:
@@ -214,7 +213,7 @@ if option == "全体":
             alt.layer(
                 alt.Chart(all_section).mark_bar(color="green").encode(x=alt.X("週:N", sort=week_order), y="CPA:Q"),
                 alt.Chart(all_section).mark_line(color="orange").encode(x="週:N", y=alt.Y("CPA変化率:Q", axis=alt.Axis(format=".1%")))
-            ).resolve_scale(y='independent').properties(title="グラフ③: CPA ALL + 変化率"),
+            ).resolve_scale(y='independent').properties(title="CPA ALL + 変化率"),
             use_container_width=True
         )
 elif option == "AFF":
@@ -224,7 +223,7 @@ elif option == "AFF":
             alt.layer(
                 alt.Chart(aff_sem_section).mark_bar(color="steelblue").encode(x=alt.X("AFF_週:N", sort=week_order), y="AFF件数:Q"),
                 alt.Chart(aff_sem_section).mark_line(color="orange").encode(x="AFF_週:N", y=alt.Y("AFF変化率:Q", axis=alt.Axis(format=".1%")))
-            ).resolve_scale(y='independent').properties(title="グラフ④: AFF 件数 + 変化率"),
+            ).resolve_scale(y='independent').properties(title="AFF 件数 + 変化率"),
             use_container_width=True
         )
     with col2:
@@ -232,7 +231,7 @@ elif option == "AFF":
             alt.layer(
                 alt.Chart(aff_sem_section).mark_bar(color="green").encode(x=alt.X("AFF_週:N", sort=week_order), y="AFFCPA:Q"),
                 alt.Chart(aff_sem_section).mark_line(color="orange").encode(x="AFF_週:N", y=alt.Y("AFFCPA変化率:Q", axis=alt.Axis(format=".1%")))
-            ).resolve_scale(y='independent').properties(title="グラフ⑤: AFF CPA + 変化率"),
+            ).resolve_scale(y='independent').properties(title="AFF CPA + 変化率"),
             use_container_width=True
         )
 else:
@@ -242,7 +241,7 @@ else:
             alt.layer(
                 alt.Chart(aff_sem_section).mark_bar(color="steelblue").encode(x=alt.X("SEM_週:N", sort=week_order), y="SEM件数:Q"),
                 alt.Chart(aff_sem_section).mark_line(color="orange").encode(x="SEM_週:N", y=alt.Y("SEM変化率:Q", axis=alt.Axis(format=".1%")))
-            ).resolve_scale(y='independent').properties(title="グラフ⑥: SEM 件数 + 変化率"),
+            ).resolve_scale(y='independent').properties(title="SEM 件数 + 変化率"),
             use_container_width=True
         )
     with col2:
@@ -250,6 +249,6 @@ else:
             alt.layer(
                 alt.Chart(aff_sem_section).mark_bar(color="green").encode(x=alt.X("SEM_週:N", sort=week_order), y="SEMCPA:Q"),
                 alt.Chart(aff_sem_section).mark_line(color="orange").encode(x="SEM_週:N", y=alt.Y("SEMCPA変化率:Q", axis=alt.Axis(format=".1%")))
-            ).resolve_scale(y='independent').properties(title="グラフ⑦: SEM CPA + 変化率"),
+            ).resolve_scale(y='independent').properties(title="SEM CPA + 変化率"),
             use_container_width=True
         )
