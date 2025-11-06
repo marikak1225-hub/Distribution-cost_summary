@@ -16,7 +16,9 @@ st.header("📑 CV・配信費集計")
 af_path = "AFマスター.xlsx"
 output = BytesIO()
 
-# AFマスター確認
+cv_result = None
+cost_results = []
+
 if os.path.exists(af_path):
     af_df = pd.read_excel(af_path, usecols="B:D", header=1, engine="openpyxl")
     af_df.columns = ["AFコード", "媒体", "分類"]
@@ -32,10 +34,7 @@ if os.path.exists(af_path):
     if start_date > end_date:
         st.warning("⚠️ 開始日が終了日より後になっています。")
 
-    # 集計結果表示
-    cv_result = None
-    cost_results = []
-
+    # CVデータ集計
     if test_file:
         st.subheader("申込データ集計結果")
         test_df = pd.read_excel(test_file, header=0, engine="openpyxl")
@@ -65,6 +64,7 @@ if os.path.exists(af_path):
         cv_result = pd.DataFrame(result_list).groupby(["分類", "媒体"], as_index=False)["CV合計"].sum()
         st.dataframe(cv_result)
 
+    # 配信費集計
     if cost_file:
         st.subheader("配信費集計結果")
         xls = pd.ExcelFile(cost_file)
