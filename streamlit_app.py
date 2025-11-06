@@ -6,7 +6,7 @@ from datetime import date
 
 # ページ設定
 st.set_page_config(layout="wide")
-st.title("📊 期間中CV・配信費集計ツール + 領域別コンディション分析")
+st.title("📊 期間中CV・配信費集計ツール　")
 
 # -------------------------
 # AFマスター読み込み（クラウド固定）
@@ -28,11 +28,27 @@ col1, col2 = st.columns(2)
 with col1:
     test_file = st.file_uploader("CVデータ（publicに変更）", type="xlsx", key="cv")
 with col2:
-    cost_file = st.file_uploader("コストレポート（必要シート・必要行のみUP)", type="xlsx", key="cost")
+    cost_file = st.file_uploader("コストレポート（パスワード解除・必要シート・必要行のみUP)", type="xlsx", key="cost")
 
-# 集計期間選択
-start_date, end_date = st.date_input("集計期間を選択", value=(date(2025, 10, 1), date(2025, 10, 21)))
-if start_date > end_date:
+# 初期値（アップロード前は今日の日付）
+default_start = date.today()
+default_end = date.today()
+
+# ファイルアップロード後に更新
+if test_file:
+    test_df = pd.read_excel(test_file, header=0, engine="openpyxl")
+    test_df["日付"] = pd.to_datetime(test_df.iloc[:, 0], errors="coerce")
+    if not test_df["日付"].isna().all():
+        default_start = test_df["日付"].min().date()
+        default_end = test_df["日付"].max().date()
+
+# date_inputに反映
+start_date, end_date = st.date_input(
+    "集計期間を選択",
+    value=(default_start, default_end),
+    min_value=default_start,
+    max_value=default_end
+)
     st.warning("⚠️ 開始日が終了日より後になっています。")
 
 # CVデータ集計
