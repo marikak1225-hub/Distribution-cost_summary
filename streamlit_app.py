@@ -34,6 +34,7 @@ with col2:
 # コストレポートからデフォルト期間取得
 default_start = date.today()
 default_end = date.today()
+xls = None
 if cost_file:
     xls = pd.ExcelFile(cost_file)
     target_sheets = [s for s in xls.sheet_names if any(k in s for k in ["Listing", "Display", "affiliate"])]
@@ -61,10 +62,7 @@ if start_date > end_date:
 if test_file:
     st.subheader("申込データ集計結果")
     test_df = pd.read_excel(test_file, header=0, engine="openpyxl")
-
-    # ✅ 日付フォーマットをYYYYMMDD固定で変換
     test_df["日付"] = pd.to_datetime(test_df.iloc[:, 0], format="%Y%m%d", errors="coerce")
-
     filtered = test_df[(test_df["日付"] >= pd.to_datetime(start_date)) & (test_df["日付"] <= pd.to_datetime(end_date))]
 
     mapping = af_df.set_index("AFコード")[["媒体", "分類"]].to_dict("index")
@@ -81,7 +79,6 @@ if test_file:
             category = mapping[code]["分類"]
         else:
             continue
-
         cv_sum = filtered[code].sum()
         result_list.append({"広告コード": code, "媒体": media, "分類": category, "CV合計": cv_sum})
 
@@ -89,16 +86,12 @@ if test_file:
     st.dataframe(cv_result)
 
 # 配信費集計
-if cost_file:
+if xls:
     st.subheader("配信費集計結果")
-    xls = pd.ExcelFile(cost_file)
-    target_sheets = [s for s in xls.sheet_names if any(k in s for k in ["Listing", "Display", "affiliate"])]
-
     for sheet in target_sheets:
         df = pd.read_excel(xls, sheet_name=sheet, engine="openpyxl")
         sheet_type = "Listing" if "Listing" in sheet else "Display" if "Display" in sheet else "Affiliate"
         date_col_index = 1 if sheet_type in ["Listing", "Display"] else 0
-
         df.iloc[:, date_col_index] = pd.to_datetime(df.iloc[:, date_col_index], errors='coerce')
         filtered_df = df[(df.iloc[:, date_col_index] >= pd.to_datetime(start_date)) & (df.iloc[:, date_col_index] <= pd.to_datetime(end_date))]
 
@@ -125,12 +118,9 @@ if cost_file:
             daily_df = pd.concat(daily_rows)
             daily_grouped = daily_df.groupby(["日付", "項目"], as_index=False)["金額"].sum()
             daily_grouped["日付"] = pd.to_datetime(daily_grouped["日付"]).dt.strftime("%Y/%m/%d")
-
             pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
-
             cost_results.append((sheet_type, pivot_df))
 
-            # ✅ ListingとDisplayは縦並び表示
             if sheet_type in ["Listing", "Display"]:
                 st.subheader(f"{sheet_type} の集計結果")
                 col_table, col_chart = st.columns([1, 1.5])
@@ -139,7 +129,7 @@ if cost_file:
                 with col_chart:
                     st.altair_chart(
                         alt.Chart(daily_grouped).mark_line().encode(
-                            x="日付:T", y="金額:Q", color="項目:N"
+                            x="日付:T", y="金額:Q", color="項目:N", tooltip=["日付", "項目", "金額"]
                         ).properties(title=f"{sheet_type} 配信費推移", width=500, height=300),
                         use_container_width=True
                     )
@@ -167,7 +157,7 @@ if affiliate_result is not None:
     affiliate_long = affiliate_result.reset_index().melt(id_vars="日付", var_name="項目", value_name="金額")
     st.altair_chart(
         alt.Chart(affiliate_long).mark_line(point=True).encode(
-            x="日付:T", y="金額:Q", color="項目:N"
+            x="日付:T", y="金額:Q", color="項目:N", tooltip=["日付", "項目", "金額"]
         ).properties(title="Affiliate 配信費推移", width=500, height=300),
         use_container_width=True
     )
@@ -176,8 +166,6 @@ if affiliate_result is not None:
 # 領域別コンディション分析
 # -------------------------
 st.header("📈 領域別コンディション分析")
-
-# データ読み込み
 condition_path = "領域別コンディション.xlsx"
 cond_df = pd.read_excel(condition_path, sheet_name="領域別コンディション", header=None)
 
@@ -187,10 +175,8 @@ all_section.columns = ["週", "件数", "変化率", "CPA", "CPA変化率"]
 
 # AFF & SEMデータ
 aff_sem_section = cond_df.iloc[33:59, [1, 3, 4, 7, 8, 10, 12, 13, 15, 16]]
-aff_sem_section.columns = [
-    "AFF_週", "AFF件数", "AFF変化率", "AFFCPA", "AFFCPA変化率",
-    "SEM_週", "SEM件数", "SEM変化率", "SEMCPA", "SEMCPA変化率"
-]
+aff_sem_section.columns = ["AFF_週", "AFF件数", "AFF変化率", "AFFCPA", "AFFCPA変化率",
+                            "SEM_週", "SEM件数", "SEM変化率", "SEMCPA", "SEMCPA変化率"]
 
 # 数値変換
 for col in ["変化率", "CPA変化率"]:
@@ -198,7 +184,7 @@ for col in ["変化率", "CPA変化率"]:
 for col in ["AFF変化率", "AFFCPA変化率", "SEM変化率", "SEMCPA変化率"]:
     aff_sem_section[col] = pd.to_numeric(aff_sem_section[col], errors="coerce")
 
-# ✅ 週順序を統一（ALL + AFF + SEM）
+# ✅ 週順序統一
 week_order = sorted(
     set(all_section["週"].dropna().tolist() +
         aff_sem_section["AFF_週"].dropna().tolist() +
@@ -206,10 +192,7 @@ week_order = sorted(
     key=lambda x: int(re.search(r"\d+", x).group()) if re.search(r"\d+", x) else 0
 )
 
-# セレクトボックス
-option = st.selectbox("表示する領域", ["全体", "AFF", "SEM"])
-
-# ✅ グラフ描画関数（共通化）
+# グラフ描画関数
 def draw_chart(df, week_col, count_col, rate_col, cpa_col, cpa_rate_col, title_prefix):
     col1, col2 = st.columns(2)
     with col1:
@@ -217,7 +200,8 @@ def draw_chart(df, week_col, count_col, rate_col, cpa_col, cpa_rate_col, title_p
             alt.layer(
                 alt.Chart(df).mark_bar(color="steelblue").encode(
                     x=alt.X(f"{week_col}:N", sort=week_order),
-                    y=alt.Y(f"{count_col}:Q", title="件数")
+                    y=alt.Y(f"{count_col}:Q", title="件数"),
+                    tooltip=[week_col, count_col, rate_col]
                 ),
                 alt.Chart(df).mark_line(color="orange").encode(
                     x=f"{week_col}:N",
@@ -231,7 +215,8 @@ def draw_chart(df, week_col, count_col, rate_col, cpa_col, cpa_rate_col, title_p
             alt.layer(
                 alt.Chart(df).mark_bar(color="green").encode(
                     x=alt.X(f"{week_col}:N", sort=week_order),
-                    y=alt.Y(f"{cpa_col}:Q", title="CPA")
+                    y=alt.Y(f"{cpa_col}:Q", title="CPA"),
+                    tooltip=[week_col, cpa_col, cpa_rate_col]
                 ),
                 alt.Chart(df).mark_line(color="orange").encode(
                     x=f"{week_col}:N",
@@ -241,7 +226,8 @@ def draw_chart(df, week_col, count_col, rate_col, cpa_col, cpa_rate_col, title_p
             use_container_width=True
         )
 
-# ✅ 表示切り替え
+# 表示切り替え
+option = st.selectbox("表示する領域", ["全体", "AFF", "SEM"])
 if option == "全体":
     draw_chart(all_section, "週", "件数", "変化率", "CPA", "CPA変化率", "ALL")
 elif option == "AFF":
