@@ -54,7 +54,7 @@ else:
             ]
 
             mapping = af_df.set_index("AFコード")["媒体"].to_dict()
-            category_map = af_df.set_index("AFコード")["分類"].to_dict()
+            mapping_cat = af_df.set_index("AFコード")["分類"].to_dict()
             ad_codes = test_df.columns[1:]
             affiliate_prefixes = ["GEN", "AFA", "AFP", "RAA"]
 
@@ -65,7 +65,7 @@ else:
                     category = "Affiliate"
                 elif code in mapping:
                     media = mapping[code]
-                    category = category_map[code]
+                    category = mapping_cat[code]
                 else:
                     continue
 
