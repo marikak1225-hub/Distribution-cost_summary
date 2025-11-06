@@ -10,51 +10,48 @@ st.set_page_config(layout="wide")
 st.title("📊 期間中CV・配信費集計ツール + 領域別コンディション分析")
 
 # -------------------------
-# AFマスター読み込み
+# Load AF Master
 # -------------------------
 @st.cache_data
 def load_af_master(path):
     return pd.read_excel(path, usecols="B:D", header=1, engine="openpyxl")
 
 af_path = "AFマスター.xlsx"
-if not os.path.exists(af_path):
-    st.error("AFマスター.xlsxがアプリフォルダにありません。配置してください。")
-else:
-    af_df = load_af_master(af_path)
-    af_df.columns = ["AFコード", "媒体", "分類"]
+condition_path = "領域別コンディション.xlsx"
+
+# -------------------------
+# UI for file upload
+# -------------------------
+col1, col2 = st.columns(2)
+with col1:
+    test_file = st.file_uploader("CVデータ（publicに変更）", type="xlsx", key="cv")
+with col2:
+    cost_file = st.file_uploader("コストレポート（必要シート・必要行のみUP)", type="xlsx", key="cost")
+
+start_date, end_date = st.date_input("集計期間を選択", value=(date(2025, 10, 1), date(2025, 10, 21)))
+if start_date > end_date:
+    st.warning("⚠️ 開始日が終了日より後になっています。")
+
+output = BytesIO()
+with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
 
     # -------------------------
-    # ファイルアップロード
+    # CVデータ集計
     # -------------------------
-    col1, col2 = st.columns(2)
-    with col1:
-        test_file = st.file_uploader("CVデータ（publicに変更）", type="xlsx", key="cv")
-    with col2:
-        cost_file = st.file_uploader("コストレポート（必要シート・必要行のみUP)", type="xlsx", key="cost")
+    if os.path.exists(af_path):
+        af_df = load_af_master(af_path)
+        af_df.columns = ["AFコード", "媒体", "分類"]
 
-    start_date, end_date = st.date_input("集計期間を選択", value=(date(2025, 10, 1), date(2025, 10, 21)))
-
-    if start_date > end_date:
-        st.warning("⚠️ 開始日が終了日より後になっています。")
-
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-
-        # -------------------------
-        # CVデータ集計
-        # -------------------------
         if test_file:
             st.subheader("申込データ集計結果")
             test_df = pd.read_excel(test_file, header=0, engine="openpyxl")
             test_df["日付"] = pd.to_datetime(test_df.iloc[:, 0], format="%Y%m%d", errors="coerce")
 
-            filtered = test_df[
-                (test_df["日付"] >= pd.to_datetime(start_date)) &
-                (test_df["日付"] <= pd.to_datetime(end_date))
-            ]
+            filtered = test_df[(test_df["日付"] >= pd.to_datetime(start_date)) & (test_df["日付"] <= pd.to_datetime(end_date))]
 
             mapping = af_df.set_index("AFコード")["媒体"].to_dict()
             mapping_cat = af_df.set_index("AFコード")["分類"].to_dict()
+
             ad_codes = test_df.columns[1:]
             affiliate_prefixes = ["GEN", "AFA", "AFP", "RAA"]
 
@@ -76,132 +73,103 @@ else:
             st.dataframe(grouped)
             grouped.to_excel(writer, index=False, sheet_name="申込件数")
 
-        # -------------------------
-        # 配信費集計（ピボット＋グラフ）
-        # -------------------------
-        if cost_file:
-            st.subheader("配信費集計結果")
+    # -------------------------
+    # 配信費集計
+    # -------------------------
+    if cost_file:
+        st.subheader("配信費集計結果")
+        xls = pd.ExcelFile(cost_file)
+        target_sheets = [s for s in xls.sheet_names if any(k in s for k in ["Listing", "Display", "affiliate"])]
 
-            xls = pd.ExcelFile(cost_file)
-            target_sheets = [s for s in xls.sheet_names if any(k in s for k in ["Listing", "Display", "affiliate"])]
+        for sheet in target_sheets:
+            df = pd.read_excel(xls, sheet_name=sheet, engine="openpyxl")
+            sheet_type = "Listing" if "Listing" in sheet else "Display" if "Display" in sheet else "Affiliate"
+            date_col_index = 1 if sheet_type in ["Listing", "Display"] else 0
 
-            for sheet in target_sheets:
-                df = pd.read_excel(xls, sheet_name=sheet, engine="openpyxl")
-                sheet_type = "Listing" if "Listing" in sheet else "Display" if "Display" in sheet else "Affiliate"
-                date_col_index = 1 if sheet_type in ["Listing", "Display"] else 0
+            df.iloc[:, date_col_index] = pd.to_datetime(df.iloc[:, date_col_index], errors='coerce')
+            filtered_df = df[(df.iloc[:, date_col_index] >= pd.to_datetime(start_date)) & (df.iloc[:, date_col_index] <= pd.to_datetime(end_date))]
 
-                df.iloc[:, date_col_index] = pd.to_datetime(df.iloc[:, date_col_index], errors='coerce')
-                filtered_df = df[
-                    (df.iloc[:, date_col_index] >= pd.to_datetime(start_date)) &
-                    (df.iloc[:, date_col_index] <= pd.to_datetime(end_date))
-                ]
+            if sheet_type == "Listing":
+                columns_to_sum = {"Listing ALL": 17, "Google単体": 53, "Google単体以外": 89, "Googleその他": 125,
+                                  "Yahoo単体": 161, "Yahoo単体以外": 197, "Microsoft単体": 233, "Microsoft単体以外": 269}
+                desired_order = ["Listing ALL", "Googleその他", "Google単体", "Google単体以外", "Yahoo単体", "Yahoo単体以外", "Microsoft単体", "Microsoft単体以外"]
+            elif sheet_type == "Display":
+                columns_to_sum = {"Display ALL": 17, "Meta": 53, "X": 89, "LINE": 125, "YDA": 161,
+                                  "TTD": 199, "TikTok": 235, "GDN": 271, "CRITEO": 307, "RUNA": 343}
+                desired_order = None
+            else:
+                columns_to_sum = {"AFF ALL": 20}
+                desired_order = None
 
-                if sheet_type == "Listing":
-                    columns_to_sum = {
-                        "Listing ALL": 17, "Google単体": 53, "Google単体以外": 89, "Googleその他": 125,
-                        "Yahoo単体": 161, "Yahoo単体以外": 197, "Microsoft単体": 233, "Microsoft単体以外": 269
-                    }
-                    desired_order = [
-                        "Listing ALL", "Googleその他", "Google単体", "Google単体以外",
-                        "Yahoo単体", "Yahoo単体以外", "Microsoft単体", "Microsoft単体以外"
-                    ]
-                elif sheet_type == "Display":
-                    columns_to_sum = {
-                        "Display ALL": 17, "Meta": 53, "X": 89, "LINE": 125, "YDA": 161,
-                        "TTD": 199, "TikTok": 235, "GDN": 271, "CRITEO": 307, "RUNA": 343
-                    }
-                    desired_order = None
-                else:
-                    columns_to_sum = {"AFF ALL": 20}
-                    desired_order = None
+            daily_rows = []
+            for label, col_index in columns_to_sum.items():
+                try:
+                    temp_df = filtered_df[[filtered_df.columns[date_col_index], filtered_df.columns[col_index]]].copy()
+                    temp_df.columns = ["日付", "金額"]
+                    temp_df["項目"] = label
+                    daily_rows.append(temp_df)
+                except Exception:
+                    continue
 
-                daily_rows = []
-                for label, col_index in columns_to_sum.items():
-                    try:
-                        temp_df = filtered_df[[filtered_df.columns[date_col_index], filtered_df.columns[col_index]]].copy()
-                        temp_df.columns = ["日付", "金額"]
-                        temp_df["項目"] = label
-                        daily_rows.append(temp_df)
-                    except Exception:
-                        continue
+            if daily_rows:
+                daily_df = pd.concat(daily_rows)
+                daily_grouped = daily_df.groupby(["日付", "項目"], as_index=False)["金額"].sum()
+                daily_grouped["日付"] = pd.to_datetime(daily_grouped["日付"]).dt.strftime("%Y/%m/%d")
+                daily_grouped = daily_grouped.sort_values(by=["項目", "日付"])
 
-                if daily_rows:
-                    daily_df = pd.concat(daily_rows)
-                    daily_grouped = daily_df.groupby(["日付", "項目"], as_index=False)["金額"].sum()
-                    daily_grouped["日付"] = pd.to_datetime(daily_grouped["日付"])
-                    daily_grouped = daily_grouped.sort_values(by=["項目", "日付"])
+                pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
+                if desired_order:
+                    ordered_cols = [col for col in desired_order if col in pivot_df.columns]
+                    pivot_df = pivot_df[ordered_cols]
 
-                    pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
+                if not pivot_df.empty and len(pivot_df.columns) > 0:
+                    pivot_df.loc["合計"] = pivot_df.sum(numeric_only=True)
 
-                    if desired_order:
-                        ordered_cols = [col for col in desired_order if col in pivot_df.columns]
-                        pivot_df = pivot_df[ordered_cols]
+                st.subheader(f"{sheet} の集計結果")
+                col_table, col_chart = st.columns([1, 1.5])
+                with col_table:
+                    st.dataframe(pivot_df)
+                with col_chart:
+                    chart = alt.Chart(daily_grouped).mark_line().encode(x="日付:T", y="金額:Q", color="項目:N").properties(width=500, height=300)
+                    st.altair_chart(chart, use_container_width=True)
 
-                    if not pivot_df.empty and len(pivot_df.columns) > 0:
-                        pivot_df.loc["合計"] = pivot_df.sum(numeric_only=True)
-
-                    st.subheader(f"{sheet} の集計結果")
-                    col_table, col_chart = st.columns([1, 1.5])
-                    with col_table:
-                        st.dataframe(pivot_df)
-
-                    with col_chart:
-                        chart = alt.Chart(daily_grouped).mark_line().encode(
-                            x="日付:T",
-                            y="金額:Q",
-                            color="項目:N"
-                        ).properties(width=500, height=300)
-                        st.altair_chart(chart, use_container_width=True)
-
-                    pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_集計")
-
-    # ExcelWriterの外でseek(0)
-    output.seek(0)
-
-    st.download_button(
-        label="📥 全集計Excelをダウンロード",
-        data=output.getvalue(),
-        file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+                pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_集計")
 
 # -------------------------
 # 領域別コンディション分析
 # -------------------------
 st.subheader("📈 領域別コンディション分析")
-condition_path = "領域別コンディション.xlsx"
 if os.path.exists(condition_path):
     cond_df = pd.read_excel(condition_path, sheet_name="領域別コンディション", header=None)
 
-    # ALLデータ抽出
-    all_section = cond_df.iloc[4:30, [1, 2, 3, 5, 7]]
-    all_section.columns = ["週", "期間", "件数", "広告費", "CPA"]
-    all_section["分類"] = "ALL"
+    # Extract ALL section
+    all_section = cond_df.iloc[4:30, [1, 3, 4, 5, 6, 7, 8]]
+    all_section.columns = ["週", "件数", "件数変化率", "広告費", "広告費変化率", "CPA", "CPA変化率"]
 
-    # AFF & SEMデータ抽出
-    aff_sem_section = cond_df.iloc[33:59, [1, 2, 3, 5, 7, 9, 10, 11, 13, 15]]
-    aff_sem_section.columns = ["AFF_週", "AFF_期間", "AFF_件数", "AFF_広告費", "AFF_CPA",
-                                "SEM_週", "SEM_期間", "SEM_件数", "SEM_広告費", "SEM_CPA"]
+    # Extract AFF & SEM section
+    aff_sem_section = cond_df.iloc[33:59, [1, 3, 4, 7, 8, 11, 12, 15, 16]]
+    aff_sem_section.columns = ["AFF週", "AFF件数", "AFF変化率", "AFFCPA", "AFFCPA変化率", "SEM週", "SEM件数", "SEMCPA", "SEMCPA変化率"]
 
-    melted_aff = aff_sem_section[["AFF_週", "AFF_件数", "AFF_広告費", "AFF_CPA"]].copy()
-    melted_aff.columns = ["週", "件数", "広告費", "CPA"]
-    melted_aff["分類"] = "AFF"
+    option = st.selectbox("表示する領域", ["全体", "AFF", "SEM"])
 
-    melted_sem = aff_sem_section[["SEM_週", "SEM_件数", "SEM_広告費", "SEM_CPA"]].copy()
-    melted_sem.columns = ["週", "件数", "広告費", "CPA"]
-    melted_sem["分類"] = "SEM"
+    def layered_chart(df, x, y1, y2, title):
+        base = alt.Chart(df).encode(x=x)
+        line1 = base.mark_line(color="blue").encode(y=alt.Y(y1, axis=alt.Axis(title=y1)))
+        line2 = base.mark_line(color="red").encode(y=alt.Y(y2, axis=alt.Axis(title=y2), scale=alt.Scale(domain=[0, 2])))
+        return alt.layer(line1, line2).resolve_scale(y='independent').properties(title=title, width=700, height=400)
 
-    final_df = pd.concat([all_section, melted_aff, melted_sem])
-    for col in ["件数", "広告費", "CPA"]:
-        final_df[col] = pd.to_numeric(final_df[col], errors="coerce")
-
-    metric = st.selectbox("表示する指標を選択", ["件数", "広告費", "CPA"])
-    chart = alt.Chart(final_df).mark_line(point=True).encode(
-        x="週:N",
-        y=alt.Y(metric, title=metric),
-        color="分類:N"
-    ).properties(width=700, height=400)
-
-    st.altair_chart(chart, use_container_width=True)
+    if option == "全体":
+        st.altair_chart(layered_chart(all_section, "週", "件数", "件数変化率", "グラフ②: CV ALL"), use_container_width=True)
+        st.altair_chart(layered_chart(all_section, "週", "CPA", "CPA変化率", "グラフ③: CPA ALL"), use_container_width=True)
+    elif option == "AFF":
+        st.altair_chart(layered_chart(aff_sem_section, "AFF週", "AFF件数", "AFF変化率", "グラフ④: AFF件数"), use_container_width=True)
+        st.altair_chart(layered_chart(aff_sem_section, "AFF週", "AFFCPA", "AFFCPA変化率", "グラフ⑤: AFF CPA"), use_container_width=True)
+    else:
+        st.altair_chart(layered_chart(aff_sem_section, "SEM週", "SEM件数", "SEM変化率", "グラフ⑥: SEM件数"), use_container_width=True)
+        st.altair_chart(layered_chart(aff_sem_section, "SEM週", "SEMCPA", "SEMCPA変化率", "グラフ⑦: SEM CPA"), use_container_width=True)
 else:
-    st.warning("領域別コンディション.xlsxが見つかりません。GitHubに追加してください。")
+    st.warning("領域別コンディション.xlsxが見つかりません。")
+
+# Download button
+output.seek(0)
+st.download_button(label="📥 全集計Excelをダウンロード", data=output.getvalue(), file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
