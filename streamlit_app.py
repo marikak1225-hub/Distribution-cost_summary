@@ -173,8 +173,10 @@ st.download_button("📥 全集計Excelをダウンロード", data=output.getva
                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # -------------------------
-# 領域別コンディション分析（グラフ①削除済み）
+# 領域別コンディション分析
 # -------------------------
+import re
+
 st.header("📈 領域別コンディション分析")
 condition_path = "領域別コンディション.xlsx"
 cond_df = pd.read_excel(condition_path, sheet_name="領域別コンディション", header=None)
@@ -194,61 +196,104 @@ for col in ["変化率", "CPA変化率"]:
 for col in ["AFF変化率", "AFFCPA変化率", "SEM変化率", "SEMCPA変化率"]:
     aff_sem_section[col] = pd.to_numeric(aff_sem_section[col], errors="coerce")
 
-week_order = sorted(all_section["週"].dropna().unique(), key=lambda x: int(x.replace("移管後", "").replace("W", "")))
+# ソート
+week_order = sorted(
+    all_section["週"].dropna().unique(),
+    key=lambda x: int(re.search(r"\d+", x).group()) if re.search(r"\d+", x) else 0
+)
 
 # セレクトボックス
 option = st.selectbox("表示する領域", ["全体", "AFF", "SEM"])
+
 if option == "全体":
     col1, col2 = st.columns(2)
     with col1:
         st.altair_chart(
             alt.layer(
-                alt.Chart(all_section).mark_bar(color="steelblue").encode(x=alt.X("週:N", sort=week_order), y="件数:Q"),
-                alt.Chart(all_section).mark_line(color="orange").encode(x="週:N", y=alt.Y("変化率:Q", axis=alt.Axis(format=".1%")))
+                alt.Chart(all_section).mark_bar(color="steelblue").encode(
+                    x=alt.X("週:N", sort=week_order),
+                    y="件数:Q"
+                ),
+                alt.Chart(all_section).mark_line(color="orange").encode(
+                    x="週:N",
+                    y=alt.Y("変化率:Q", axis=alt.Axis(format=".1%"))
+                )
             ).resolve_scale(y='independent').properties(title="CV ALL 件数 + 変化率"),
             use_container_width=True
         )
     with col2:
         st.altair_chart(
             alt.layer(
-                alt.Chart(all_section).mark_bar(color="green").encode(x=alt.X("週:N", sort=week_order), y="CPA:Q"),
-                alt.Chart(all_section).mark_line(color="orange").encode(x="週:N", y=alt.Y("CPA変化率:Q", axis=alt.Axis(format=".1%")))
+                alt.Chart(all_section).mark_bar(color="green").encode(
+                    x=alt.X("週:N", sort=week_order),
+                    y="CPA:Q"
+                ),
+                alt.Chart(all_section).mark_line(color="orange").encode(
+                    x="週:N",
+                    y=alt.Y("CPA変化率:Q", axis=alt.Axis(format=".1%"))
+                )
             ).resolve_scale(y='independent').properties(title="CPA ALL + 変化率"),
             use_container_width=True
         )
+
 elif option == "AFF":
     col1, col2 = st.columns(2)
     with col1:
         st.altair_chart(
             alt.layer(
-                alt.Chart(aff_sem_section).mark_bar(color="steelblue").encode(x=alt.X("AFF_週:N", sort=week_order), y="AFF件数:Q"),
-                alt.Chart(aff_sem_section).mark_line(color="orange").encode(x="AFF_週:N", y=alt.Y("AFF変化率:Q", axis=alt.Axis(format=".1%")))
+                alt.Chart(aff_sem_section).mark_bar(color="steelblue").encode(
+                    x=alt.X("AFF_週:N", sort=week_order),
+                    y="AFF件数:Q"
+                ),
+                alt.Chart(aff_sem_section).mark_line(color="orange").encode(
+                    x="AFF_週:N",
+                    y=alt.Y("AFF変化率:Q", axis=alt.Axis(format=".1%"))
+                )
             ).resolve_scale(y='independent').properties(title="AFF 件数 + 変化率"),
             use_container_width=True
         )
     with col2:
         st.altair_chart(
             alt.layer(
-                alt.Chart(aff_sem_section).mark_bar(color="green").encode(x=alt.X("AFF_週:N", sort=week_order), y="AFFCPA:Q"),
-                alt.Chart(aff_sem_section).mark_line(color="orange").encode(x="AFF_週:N", y=alt.Y("AFFCPA変化率:Q", axis=alt.Axis(format=".1%")))
+                alt.Chart(aff_sem_section).mark_bar(color="green").encode(
+                    x=alt.X("AFF_週:N", sort=week_order),
+                    y="AFFCPA:Q"
+                ),
+                alt.Chart(aff_sem_section).mark_line(color="orange").encode(
+                    x="AFF_週:N",
+                    y=alt.Y("AFFCPA変化率:Q", axis=alt.Axis(format=".1%"))
+                )
             ).resolve_scale(y='independent').properties(title="AFF CPA + 変化率"),
             use_container_width=True
         )
-else:
+
+else:  # SEM
     col1, col2 = st.columns(2)
     with col1:
         st.altair_chart(
             alt.layer(
-                alt.Chart(aff_sem_section).mark_bar(color="steelblue").encode(x=alt.X("SEM_週:N", sort=week_order), y="SEM件数:Q"),
-                alt.Chart(aff_sem_section).mark_line(color="orange").encode(x="SEM_週:N", y=alt.Y("SEM変化率:Q", axis=alt.Axis(format=".1%")))
+                alt.Chart(aff_sem_section).mark_bar(color="steelblue").encode(
+                    x=alt.X("SEM_週:N", sort=week_order),
+                    y="SEM件数:Q"
+                ),
+                alt.Chart(aff_sem_section).mark_line(color="orange").encode(
+                    x="SEM_週:N",
+                    y=alt.Y("SEM変化率:Q", axis=alt.Axis(format=".1%"))
+                )
             ).resolve_scale(y='independent').properties(title="SEM 件数 + 変化率"),
             use_container_width=True
         )
     with col2:
         st.altair_chart(
             alt.layer(
-                alt.Chart(aff_sem_section).mark_bar(color="green").encode(x=alt.X("SEM_週:N", sort=week_order), y="SEMCPA:Q"),
-                alt.Chart(aff_sem_section).mark_line(color="orange").encode(x="SEM_週:N", y=alt.Y("SEMCPA変化率:Q", axis=alt.Axis(format=".1%")))
+                alt.Chart(aff_sem_section).mark_bar(color="green").encode(
+                    x=alt.X("SEM_週:N", sort=week_order),
+                    y="SEMCPA:Q"
+                ),
+                alt.Chart(aff_sem_section).mark_line(color="orange").encode(
+                    x="SEM_週:N",
+                    y=alt.Y("SEMCPA変化率:Q", axis=alt.Axis(format=".1%"))
+                )
             ).resolve_scale(y='independent').properties(title="SEM CPA + 変化率"),
             use_container_width=True
         )
