@@ -120,6 +120,7 @@ else:
 # 領域別コンディション分析セクション
 # -------------------------
 st.header("📈 領域別コンディション分析")
+condition_path = "領域別コンディション.xlsx"
 if os.path.exists(condition_path):
     cond_df = pd.read_excel(condition_path, sheet_name="領域別コンディション", header=None)
 
