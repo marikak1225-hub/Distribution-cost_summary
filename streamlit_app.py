@@ -34,7 +34,6 @@ with col2:
 # コストレポートからデフォルト期間取得
 default_start = date.today()
 default_end = date.today()
-xls = None
 if cost_file:
     xls = pd.ExcelFile(cost_file)
     target_sheets = [s for s in xls.sheet_names if any(k in s for k in ["Listing", "Display", "affiliate"])]
@@ -79,6 +78,7 @@ if test_file:
             category = mapping[code]["分類"]
         else:
             continue
+
         cv_sum = filtered[code].sum()
         result_list.append({"広告コード": code, "媒体": media, "分類": category, "CV合計": cv_sum})
 
@@ -86,12 +86,16 @@ if test_file:
     st.dataframe(cv_result)
 
 # 配信費集計
-if xls:
+if cost_file:
     st.subheader("配信費集計結果")
+    xls = pd.ExcelFile(cost_file)
+    target_sheets = [s for s in xls.sheet_names if any(k in s for k in ["Listing", "Display", "affiliate"])]
+
     for sheet in target_sheets:
         df = pd.read_excel(xls, sheet_name=sheet, engine="openpyxl")
         sheet_type = "Listing" if "Listing" in sheet else "Display" if "Display" in sheet else "Affiliate"
         date_col_index = 1 if sheet_type in ["Listing", "Display"] else 0
+
         df.iloc[:, date_col_index] = pd.to_datetime(df.iloc[:, date_col_index], errors='coerce')
         filtered_df = df[(df.iloc[:, date_col_index] >= pd.to_datetime(start_date)) & (df.iloc[:, date_col_index] <= pd.to_datetime(end_date))]
 
@@ -118,9 +122,11 @@ if xls:
             daily_df = pd.concat(daily_rows)
             daily_grouped = daily_df.groupby(["日付", "項目"], as_index=False)["金額"].sum()
             daily_grouped["日付"] = pd.to_datetime(daily_grouped["日付"]).dt.strftime("%Y/%m/%d")
+
             pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
             cost_results.append((sheet_type, pivot_df))
 
+            # グラフ表示
             if sheet_type in ["Listing", "Display"]:
                 st.subheader(f"{sheet_type} の集計結果")
                 col_table, col_chart = st.columns([1, 1.5])
@@ -128,39 +134,18 @@ if xls:
                     st.dataframe(pivot_df)
                 with col_chart:
                     st.altair_chart(
-                        alt.Chart(daily_grouped).mark_line().encode(
+                        alt.Chart(daily_grouped).mark_line(point=True).encode(
                             x="日付:T", y="金額:Q", color="項目:N", tooltip=["日付", "項目", "金額"]
                         ).properties(title=f"{sheet_type} 配信費推移", width=500, height=300),
                         use_container_width=True
                     )
 
-# Excel出力
+# Excel出力（CV + 配信費）
 with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
     if cv_result is not None:
         cv_result.to_excel(writer, index=False, sheet_name="申込件数")
     for sheet_type, pivot_df in cost_results:
         pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_集計")
-
-st.download_button("📥 全集計Excelをダウンロード", data=output.getvalue(),
-                   file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
-                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-# -------------------------
-# Affiliate専用横並び表示
-# -------------------------
-affiliate_result = next((df for sheet_type, df in cost_results if sheet_type == "Affiliate"), None)
-if affiliate_result is not None:
-    st.subheader("2025年11月度 (Affiliate) 集計結果")
-    col_table, col_chart = st.columns([1, 1.5])
-    with col_table:
-        st.dataframe(affiliate_result)
-    affiliate_long = affiliate_result.reset_index().melt(id_vars="日付", var_name="項目", value_name="金額")
-    st.altair_chart(
-        alt.Chart(affiliate_long).mark_line(point=True).encode(
-            x="日付:T", y="金額:Q", color="項目:N", tooltip=["日付", "項目", "金額"]
-        ).properties(title="Affiliate 配信費推移", width=500, height=300),
-        use_container_width=True
-    )
 
 # -------------------------
 # 領域別コンディション分析
@@ -175,8 +160,10 @@ all_section.columns = ["週", "件数", "変化率", "CPA", "CPA変化率"]
 
 # AFF & SEMデータ
 aff_sem_section = cond_df.iloc[33:59, [1, 3, 4, 7, 8, 10, 12, 13, 15, 16]]
-aff_sem_section.columns = ["AFF_週", "AFF件数", "AFF変化率", "AFFCPA", "AFFCPA変化率",
-                            "SEM_週", "SEM件数", "SEM変化率", "SEMCPA", "SEMCPA変化率"]
+aff_sem_section.columns = [
+    "AFF_週", "AFF件数", "AFF変化率", "AFFCPA", "AFFCPA変化率",
+    "SEM_週", "SEM件数", "SEM変化率", "SEMCPA", "SEMCPA変化率"
+]
 
 # 数値変換
 for col in ["変化率", "CPA変化率"]:
@@ -192,8 +179,10 @@ week_order = sorted(
     key=lambda x: int(re.search(r"\d+", x).group()) if re.search(r"\d+", x) else 0
 )
 
-# グラフ描画関数
+# ✅ グラフ描画関数
 def draw_chart(df, week_col, count_col, rate_col, cpa_col, cpa_rate_col, title_prefix):
+    avg_count = df[count_col].mean()
+    avg_cpa = df[cpa_col].mean()
     col1, col2 = st.columns(2)
     with col1:
         st.altair_chart(
@@ -205,8 +194,10 @@ def draw_chart(df, week_col, count_col, rate_col, cpa_col, cpa_rate_col, title_p
                 ),
                 alt.Chart(df).mark_line(color="orange").encode(
                     x=f"{week_col}:N",
-                    y=alt.Y(f"{rate_col}:Q", axis=alt.Axis(format=".1%", title="変化率"))
-                )
+                    y=alt.Y(f"{rate_col}:Q", axis=alt.Axis(format=".1%", title="変化率")),
+                    tooltip=[week_col, rate_col]
+                ),
+                alt.Chart(pd.DataFrame({"y": [avg_count]})).mark_rule(color="red").encode(y="y:Q")
             ).resolve_scale(y='independent').properties(title=f"{title_prefix} 件数 + 変化率"),
             use_container_width=True
         )
@@ -220,8 +211,10 @@ def draw_chart(df, week_col, count_col, rate_col, cpa_col, cpa_rate_col, title_p
                 ),
                 alt.Chart(df).mark_line(color="orange").encode(
                     x=f"{week_col}:N",
-                    y=alt.Y(f"{cpa_rate_col}:Q", axis=alt.Axis(format=".1%", title="CPA変化率"))
-                )
+                    y=alt.Y(f"{cpa_rate_col}:Q", axis=alt.Axis(format=".1%", title="CPA変化率")),
+                    tooltip=[week_col, cpa_rate_col]
+                ),
+                alt.Chart(pd.DataFrame({"y": [avg_cpa]})).mark_rule(color="red").encode(y="y:Q")
             ).resolve_scale(y='independent').properties(title=f"{title_prefix} CPA + 変化率"),
             use_container_width=True
         )
@@ -234,3 +227,20 @@ elif option == "AFF":
     draw_chart(aff_sem_section, "AFF_週", "AFF件数", "AFF変化率", "AFFCPA", "AFFCPA変化率", "AFF")
 else:
     draw_chart(aff_sem_section, "SEM_週", "SEM件数", "SEM変化率", "SEMCPA", "SEMCPA変化率", "SEM")
+
+# Excel出力（コンディション分析も追加）
+with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+    if cv_result is not None:
+        cv_result.to_excel(writer, index=False, sheet_name="申込件数")
+    for sheet_type, pivot_df in cost_results:
+        pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_集計")
+    all_section.to_excel(writer, sheet_name="ALL", index=False)
+    aff_sem_section.to_excel(writer, sheet_name="AFF_SEM", index=False)
+
+# ダウンロードボタン
+st.download_button(
+    "📥 全集計Excelをダウンロード",
+    data=output.getvalue(),
+    file_name=f"集計結果_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
