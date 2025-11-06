@@ -5,18 +5,19 @@ import os
 from io import BytesIO
 from datetime import date
 
+# ページ設定
 st.set_page_config(layout="wide")
-st.title("📊 期間中CV・配信費集計ツール")
+st.title("📊 期間中CV・配信費集計ツール + 領域別コンディション分析")
 
-@st.cache_data
-def load_af_master(path):
-    return pd.read_excel(path, usecols="B:D", header=1, engine="openpyxl")
-
+# -------------------------
+# CV・配信費集計セクション
+# -------------------------
+st.header("📑 CV・配信費集計")
 af_path = "AFマスター.xlsx"
-if not os.path.exists(af_path):
-    st.error("AFマスター.xlsxがアプリフォルダにありません。配置してください。")
-else:
-    af_df = load_af_master(af_path)
+output = BytesIO()
+
+if os.path.exists(af_path):
+    af_df = pd.read_excel(af_path, usecols="B:D", header=1, engine="openpyxl")
     af_df.columns = ["AFコード", "媒体", "分類"]
 
     col1, col2 = st.columns(2)
@@ -30,23 +31,17 @@ else:
     if start_date > end_date:
         st.warning("⚠️ 開始日が終了日より後になっています。")
 
-    output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-
-        # -------------------------
         # CVデータ集計
-        # -------------------------
         if test_file:
             st.subheader("申込データ集計結果")
             test_df = pd.read_excel(test_file, header=0, engine="openpyxl")
             test_df["日付"] = pd.to_datetime(test_df.iloc[:, 0], format="%Y%m%d", errors="coerce")
 
-            filtered = test_df[
-                (test_df["日付"] >= pd.to_datetime(start_date)) &
-                (test_df["日付"] <= pd.to_datetime(end_date))
-            ]
+            filtered = test_df[(test_df["日付"] >= pd.to_datetime(start_date)) & (test_df["日付"] <= pd.to_datetime(end_date))]
 
-            mapping = af_df.set_index("AFコード")[["媒体", "分類"]].to_dict("index")
+            mapping = af_df.set_index("AFコード")["媒体"].to_dict()
+            mapping_cat = af_df.set_index("AFコード")["分類"].to_dict()
             ad_codes = test_df.columns[1:]
             affiliate_prefixes = ["GEN", "AFA", "AFP", "RAA"]
 
@@ -56,8 +51,8 @@ else:
                     media = "Affiliate"
                     category = "Affiliate"
                 elif code in mapping:
-                    media = mapping[code]["媒体"]
-                    category = mapping[code]["分類"]
+                    media = mapping[code]
+                    category = mapping_cat[code]
                 else:
                     continue
 
@@ -68,12 +63,9 @@ else:
             st.dataframe(grouped)
             grouped.to_excel(writer, index=False, sheet_name="申込件数")
 
-        # -------------------------
-        # 配信費集計（ピボット＋グラフ）
-        # -------------------------
+        # 配信費集計
         if cost_file:
             st.subheader("配信費集計結果")
-
             xls = pd.ExcelFile(cost_file)
             target_sheets = [s for s in xls.sheet_names if any(k in s for k in ["Listing", "Display", "affiliate"])]
 
@@ -83,29 +75,17 @@ else:
                 date_col_index = 1 if sheet_type in ["Listing", "Display"] else 0
 
                 df.iloc[:, date_col_index] = pd.to_datetime(df.iloc[:, date_col_index], errors='coerce')
-                filtered_df = df[
-                    (df.iloc[:, date_col_index] >= pd.to_datetime(start_date)) &
-                    (df.iloc[:, date_col_index] <= pd.to_datetime(end_date))
-                ]
+                filtered_df = df[(df.iloc[:, date_col_index] >= pd.to_datetime(start_date)) & (df.iloc[:, date_col_index] <= pd.to_datetime(end_date))]
 
+                # 列マッピング
                 if sheet_type == "Listing":
-                    columns_to_sum = {
-                        "Listing ALL": 17, "Google単体": 53, "Google単体以外": 89, "Googleその他": 125,
-                        "Yahoo単体": 161, "Yahoo単体以外": 197, "Microsoft単体": 233, "Microsoft単体以外": 269
-                    }
-                    desired_order = [
-                        "Listing ALL", "Googleその他", "Google単体", "Google単体以外",
-                        "Yahoo単体", "Yahoo単体以外", "Microsoft単体", "Microsoft単体以外"
-                    ]
+                    columns_to_sum = {"Listing ALL": 17, "Google単体": 53, "Google単体以外": 89, "Googleその他": 125,
+                                      "Yahoo単体": 161, "Yahoo単体以外": 197, "Microsoft単体": 233, "Microsoft単体以外": 269}
                 elif sheet_type == "Display":
-                    columns_to_sum = {
-                        "Display ALL": 17, "Meta": 53, "X": 89, "LINE": 125, "YDA": 161,
-                        "TTD": 199, "TikTok": 235, "GDN": 271, "CRITEO": 307, "RUNA": 343
-                    }
-                    desired_order = None
+                    columns_to_sum = {"Display ALL": 17, "Meta": 53, "X": 89, "LINE": 125, "YDA": 161,
+                                      "TTD": 199, "TikTok": 235, "GDN": 271, "CRITEO": 307, "RUNA": 343}
                 else:
                     columns_to_sum = {"AFF ALL": 20}
-                    desired_order = None
 
                 daily_rows = []
                 for label, col_index in columns_to_sum.items():
@@ -121,47 +101,25 @@ else:
                     daily_df = pd.concat(daily_rows)
                     daily_grouped = daily_df.groupby(["日付", "項目"], as_index=False)["金額"].sum()
                     daily_grouped["日付"] = pd.to_datetime(daily_grouped["日付"]).dt.strftime("%Y/%m/%d")
-                    daily_grouped = daily_grouped.sort_values(by=["項目", "日付"])
 
                     pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
+                    st.dataframe(pivot_df)
 
-                    if desired_order:
-                        ordered_cols = [col for col in desired_order if col in pivot_df.columns]
-                        pivot_df = pivot_df[ordered_cols]
-
-                    # ✅ 合計行を追加（空でない場合のみ）
-                    if not pivot_df.empty and len(pivot_df.columns) > 0:
-                        pivot_df.loc["合計"] = pivot_df.sum(numeric_only=True)
-
-                    st.subheader(f"{sheet} の集計結果")
-                    col_table, col_chart = st.columns([1, 1.5])
-                    with col_table:
-                        st.dataframe(pivot_df)
-
-                    with col_chart:
-                        chart = alt.Chart(daily_grouped).mark_line().encode(
-                            x="日付:T",
-                            y="金額:Q",
-                            color="項目:N"
-                        ).properties(width=500, height=300)
-                        st.altair_chart(chart, use_container_width=True)
+                    chart = alt.Chart(daily_grouped).mark_line().encode(x="日付:T", y="金額:Q", color="項目:N")
+                    st.altair_chart(chart, use_container_width=True)
 
                     pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_集計")
 
-    # ✅ ExcelWriterの外でseek(0)を呼び出す
-    output.seek(0)
+    st.download_button("📥 全集計Excelをダウンロード", data=output.getvalue(),
+                       file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+else:
+    st.warning("AFマスターがないためCV集計は利用できません。")
 
-    # ✅ ダウンロードボタンを最終的に表示
-    st.download_button(
-        label="📥 全集計Excelをダウンロード",
-        data=output.getvalue(),
-        file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
 # -------------------------
-# 領域別コンディション分析
+# 領域別コンディション分析セクション
 # -------------------------
-st.subheader("📈 領域別コンディション分析")
+st.header("📈 領域別コンディション分析")
 if os.path.exists(condition_path):
     cond_df = pd.read_excel(condition_path, sheet_name="領域別コンディション", header=None)
 
@@ -180,74 +138,51 @@ if os.path.exists(condition_path):
     for col in ["AFF変化率", "AFFCPA変化率", "SEM変化率", "SEMCPA変化率"]:
         aff_sem_section[col] = pd.to_numeric(aff_sem_section[col], errors="coerce")
 
-    # ソート順
     week_order = sorted(all_section["週"].dropna().unique(), key=lambda x: int(x.replace("移管後", "").replace("W", "")))
 
     # グラフ①
-    aff_area = alt.Chart(aff_sem_section).mark_area(opacity=0.4, color="steelblue").encode(
-        x=alt.X("AFF_週:N", sort=week_order),
-        y=alt.Y("AFF件数:Q", title="件数")
-    )
-    sem_area = alt.Chart(aff_sem_section).mark_area(opacity=0.4, color="green").encode(
-        x=alt.X("AFF_週:N", sort=week_order),
-        y="SEM件数:Q"
-    )
-    aff_line = alt.Chart(aff_sem_section).mark_line(color="blue").encode(
-        x="AFF_週:N",
-        y=alt.Y("AFF変化率:Q", axis=alt.Axis(title="変化率", format=".1%"))
-    )
-    sem_line = alt.Chart(aff_sem_section).mark_line(color="darkgreen").encode(
-        x="AFF_週:N",
-        y=alt.Y("SEM変化率:Q", axis=alt.Axis(format=".1%"))
-    )
+    aff_area = alt.Chart(aff_sem_section).mark_area(opacity=0.4, color="steelblue").encode(x=alt.X("AFF_週:N", sort=week_order), y="AFF件数:Q")
+    sem_area = alt.Chart(aff_sem_section).mark_area(opacity=0.4, color="green").encode(x="AFF_週:N", y="SEM件数:Q")
+    aff_line = alt.Chart(aff_sem_section).mark_line(color="blue").encode(x="AFF_週:N", y=alt.Y("AFF変化率:Q", axis=alt.Axis(title="変化率", format=".1%")))
+    sem_line = alt.Chart(aff_sem_section).mark_line(color="darkgreen").encode(x="AFF_週:N", y=alt.Y("SEM変化率:Q", axis=alt.Axis(format=".1%")))
 
-    chart1 = alt.layer(aff_area, sem_area, aff_line, sem_line).resolve_scale(y='independent').properties(
-        width=800, height=400, title="グラフ①: AFF・SEM 件数 + 変化率"
-    )
-    st.altair_chart(chart1, use_container_width=True)
+    st.altair_chart(alt.layer(aff_area, sem_area, aff_line, sem_line).resolve_scale(y='independent').properties(title="グラフ①: AFF・SEM 件数 + 変化率"), use_container_width=True)
 
     # セレクトボックス
     option = st.selectbox("表示する領域", ["全体", "AFF", "SEM"])
     if option == "全体":
         col1, col2 = st.columns(2)
         with col1:
-            chart2 = alt.layer(
+            st.altair_chart(alt.layer(
                 alt.Chart(all_section).mark_bar(color="steelblue").encode(x=alt.X("週:N", sort=week_order), y="件数:Q"),
                 alt.Chart(all_section).mark_line(color="orange").encode(x="週:N", y=alt.Y("変化率:Q", axis=alt.Axis(format=".1%")))
-            ).resolve_scale(y='independent').properties(title="グラフ②: CV ALL 件数 + 変化率")
-            st.altair_chart(chart2, use_container_width=True)
+            ).resolve_scale(y='independent').properties(title="グラフ②: CV ALL 件数 + 変化率"), use_container_width=True)
         with col2:
-            chart3 = alt.layer(
+            st.altair_chart(alt.layer(
                 alt.Chart(all_section).mark_bar(color="green").encode(x=alt.X("週:N", sort=week_order), y="CPA:Q"),
                 alt.Chart(all_section).mark_line(color="orange").encode(x="週:N", y=alt.Y("CPA変化率:Q", axis=alt.Axis(format=".1%")))
-            ).resolve_scale(y='independent').properties(title="グラフ③: CPA ALL + 変化率")
-            st.altair_chart(chart3, use_container_width=True)
-
+            ).resolve_scale(y='independent').properties(title="グラフ③: CPA ALL + 変化率"), use_container_width=True)
     elif option == "AFF":
         col1, col2 = st.columns(2)
         with col1:
-            chart4 = alt.layer(
+            st.altair_chart(alt.layer(
                 alt.Chart(aff_sem_section).mark_bar(color="steelblue").encode(x=alt.X("AFF_週:N", sort=week_order), y="AFF件数:Q"),
                 alt.Chart(aff_sem_section).mark_line(color="orange").encode(x="AFF_週:N", y=alt.Y("AFF変化率:Q", axis=alt.Axis(format=".1%")))
-            ).resolve_scale(y='independent').properties(title="グラフ④: AFF 件数 + 変化率")
-            st.altair_chart(chart4, use_container_width=True)
+            ).resolve_scale(y='independent').properties(title="グラフ④: AFF 件数 + 変化率"), use_container_width=True)
         with col2:
-            chart5 = alt.layer(
+            st.altair_chart(alt.layer(
                 alt.Chart(aff_sem_section).mark_bar(color="green").encode(x=alt.X("AFF_週:N", sort=week_order), y="AFFCPA:Q"),
                 alt.Chart(aff_sem_section).mark_line(color="orange").encode(x="AFF_週:N", y=alt.Y("AFFCPA変化率:Q", axis=alt.Axis(format=".1%")))
-            ).resolve_scale(y='independent').properties(title="グラフ⑤: AFF CPA + 変化率")
-            st.altair_chart(chart5, use_container_width=True)
-
-    else:  # SEM
+            ).resolve_scale(y='independent').properties(title="グラフ⑤: AFF CPA + 変化率"), use_container_width=True)
+    else:
         col1, col2 = st.columns(2)
         with col1:
-            chart6 = alt.layer(
+            st.altair_chart(alt.layer(
                 alt.Chart(aff_sem_section).mark_bar(color="steelblue").encode(x=alt.X("SEM_週:N", sort=week_order), y="SEM件数:Q"),
                 alt.Chart(aff_sem_section).mark_line(color="orange").encode(x="SEM_週:N", y=alt.Y("SEM変化率:Q", axis=alt.Axis(format=".1%")))
-            ).resolve_scale(y='independent').properties(title="グラフ⑥: SEM 件数 + 変化率")
-            st.altair_chart(chart6, use_container_width=True)
+            ).resolve_scale(y='independent').properties(title="グラフ⑥: SEM 件数 + 変化率"), use_container_width=True)
         with col2:
-            chart7 = alt.layer(
+            st.altair_chart(alt.layer(
                 alt.Chart(aff_sem_section).mark_bar(color="green").encode(x=alt.X("SEM_週:N", sort=week_order), y="SEMCPA:Q"),
                 alt.Chart(aff_sem_section).mark_line(color="orange").encode(x="SEM_週:N", y=alt.Y("SEMCPA変化率:Q", axis=alt.Axis(format=".1%")))
-            ).resolve_scale(y='independent').properties(title="グラフ⑦: SEM CPA + 変化率")
+            ).resolve_scale(y='independent').properties(title="グラフ⑦: SEM CPA + 変化率"), use_container_width=True)
