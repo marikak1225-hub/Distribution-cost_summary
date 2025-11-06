@@ -22,9 +22,8 @@ condition_path = "領域別コンディション.xlsx"
 # -------------------------
 # CV・配信費集計
 # -------------------------
-if not os.path.exists(af_path):
-    st.error("AFマスター.xlsxがアプリフォルダにありません。配置してください。")
-else:
+st.subheader("📑 CV・配信費集計")
+if os.path.exists(af_path):
     af_df = load_af_master(af_path)
     af_df.columns = ["AFコード", "媒体", "分類"]
 
@@ -253,4 +252,3 @@ if os.path.exists(condition_path):
                 alt.Chart(aff_sem_section).mark_bar(color="green").encode(x=alt.X("SEM_週:N", sort=week_order), y="SEMCPA:Q"),
                 alt.Chart(aff_sem_section).mark_line(color="orange").encode(x="SEM_週:N", y=alt.Y("SEMCPA変化率:Q", axis=alt.Axis(format=".1%")))
             ).resolve_scale(y='independent').properties(title="グラフ⑦: SEM CPA + 変化率")
-            st.altair_chart(chart7, use_container_width=True)
