@@ -164,46 +164,58 @@ else:
 # -------------------------
 condition_path = "領域別コンディション.xlsx"
 if not os.path.exists(condition_path):
-    st.error("領域別コンディション.xlsxが見つかりません。")
+    st.error("領域別コンディション.xlsxが見つかりません。配置してください。")
 else:
     cond_df = pd.read_excel(condition_path, sheet_name="領域別コンディション", header=None)
 
     # Extract ALL section (rows 4-29)
-    all_section = cond_df.iloc[4:30, [1, 3, 4, 5, 6, 7, 8]]
-    all_section.columns = ["週", "件数", "変化率", "広告費", "広告費変化率", "CPA", "CPA変化率"]
-    all_section = all_section.dropna(subset=["週"])
+    all_section = cond_df.iloc[4:30, [1, 3, 4, 7, 8]]
+    all_section.columns = ["週", "件数", "変化率", "CPA", "CPA変化率"]
+    all_section["分類"] = "ALL"
 
     # Extract AFF & SEM section (rows 33-59)
-    aff_sem_section = cond_df.iloc[33:59, [1, 3, 4, 7, 8, 10, 12, 13, 15, 16]]
-    aff_sem_section.columns = ["AFF週", "AFF件数", "AFF変化率", "AFFCPA", "AFFCPA変化率",
-                                "SEM週", "SEM件数", "SEM変化率", "SEMCPA", "SEMCPA変化率"]
-    aff_sem_section = aff_sem_section.dropna(subset=["AFF週"])
+    aff_sem_section = cond_df.iloc[33:59, [1, 3, 4, 7, 8, 10, 12, 13, 16]]
+    aff_sem_section.columns = ["AFF_週", "AFF件数", "AFF変化率", "AFF_CPA", "AFF_CPA変化率",
+                                "SEM_週", "SEM件数", "SEM変化率", "SEM_CPA変化率"]
 
-    # Week order for sorting
-    week_order = sorted(all_section["週"].unique(), key=lambda x: int(x.replace("移管後", "").replace("W", "")))
+    # Convert to numeric and percentage
+    for col in ["変化率", "CPA変化率", "AFF変化率", "AFF_CPA変化率", "SEM変化率", "SEM_CPA変化率"]:
+        if col in all_section.columns:
+            all_section[col] = pd.to_numeric(all_section[col], errors="coerce") * 100
+    for col in ["AFF変化率", "AFF_CPA変化率", "SEM変化率", "SEM_CPA変化率"]:
+        aff_sem_section[col] = pd.to_numeric(aff_sem_section[col], errors="coerce") * 100
+
+    # Sort weeks
+    week_order_all = all_section["週"].tolist()
+    week_order_aff = aff_sem_section["AFF_週"].tolist()
 
     # -------------------------
     # グラフ①: AFF件数・SEM件数 (塗りつぶし) + AFF変化率・SEM変化率 (折れ線)
     # -------------------------
-    aff_sem_chart_data = pd.DataFrame({
-        "週": aff_sem_section["AFF週"],
-        "AFF件数": aff_sem_section["AFF件数"],
-        "AFF変化率": aff_sem_section["AFF変化率"],
-        "SEM件数": aff_sem_section["SEM件数"],
-        "SEM変化率": aff_sem_section["SEM変化率"]
-    })
-
-    base = alt.Chart(aff_sem_chart_data).encode(x=alt.X("週", sort=week_order))
-    area_aff = base.mark_area(opacity=0.4, color="steelblue").encode(y=alt.Y("AFF件数", axis=alt.Axis(title="件数")))
-    area_sem = base.mark_area(opacity=0.4, color="green").encode(y="SEM件数")
-    line_aff = base.mark_line(color="blue").encode(y=alt.Y("AFF変化率", axis=alt.Axis(title="変化率")))
-    line_sem = base.mark_line(color="darkgreen").encode(y="SEM変化率")
-
-    chart1 = alt.layer(area_aff, area_sem, line_aff, line_sem).resolve_scale(y='independent').properties(
+    aff_area = alt.Chart(aff_sem_section).mark_area(opacity=0.4, color="steelblue").encode(
+        x=alt.X("AFF_週", sort=week_order_aff),
+        y=alt.Y("AFF件数", title="件数"),
+        tooltip=["AFF_週", "AFF件数"]
+    )
+    sem_area = alt.Chart(aff_sem_section).mark_area(opacity=0.4, color="green").encode(
+        x=alt.X("AFF_週", sort=week_order_aff),
+        y="SEM件数",
+        tooltip=["SEM_週", "SEM件数"]
+    )
+    aff_line = alt.Chart(aff_sem_section).mark_line(color="blue").encode(
+        x="AFF_週",
+        y=alt.Y("AFF変化率", title="変化率", axis=alt.Axis(format=".1f%")),
+        tooltip=["AFF_週", alt.Tooltip("AFF変化率", format=".1f%")]
+    )
+    sem_line = alt.Chart(aff_sem_section).mark_line(color="darkgreen").encode(
+        x="AFF_週",
+        y=alt.Y("SEM変化率", axis=alt.Axis(format=".1f%")),
+        tooltip=["SEM_週", alt.Tooltip("SEM変化率", format=".1f%")]
+    )
+    graph1 = alt.layer(aff_area, sem_area, aff_line, sem_line).resolve_scale(y='independent').properties(
         width=800, height=400, title="グラフ①: AFF・SEM 件数(塗りつぶし) + 変化率(折れ線)"
     )
-
-    st.altair_chart(chart1, use_container_width=True)
+    st.altair_chart(graph1, use_container_width=True)
 
     # -------------------------
     # Selectbox for other charts
@@ -213,47 +225,92 @@ else:
     if option == "全体":
         col1, col2 = st.columns(2)
         with col1:
-            # グラフ②: CV ALL 件数 vs 変化率
-            base_all = alt.Chart(all_section).encode(x=alt.X("週", sort=week_order))
-            bar_cv = base_all.mark_bar(color="steelblue").encode(y=alt.Y("件数", axis=alt.Axis(title="件数")))
-            line_cv = base_all.mark_line(color="orange").encode(y=alt.Y("変化率", axis=alt.Axis(title="変化率")))
-            chart2 = alt.layer(bar_cv, line_cv).resolve_scale(y='independent').properties(title="グラフ②: CV ALL 件数 + 変化率")
-            st.altair_chart(chart2, use_container_width=True)
+            graph2 = alt.layer(
+                alt.Chart(all_section).mark_bar(color="steelblue").encode(
+                    x=alt.X("週", sort=week_order_all),
+                    y="件数",
+                    tooltip=["週", "件数"]
+                ),
+                alt.Chart(all_section).mark_line(color="orange").encode(
+                    x="週",
+                    y=alt.Y("変化率", axis=alt.Axis(format=".1f%")),
+                    tooltip=["週", alt.Tooltip("変化率", format=".1f%")]
+                )
+            ).resolve_scale(y='independent').properties(title="グラフ②: CV ALL 件数 + 変化率")
+            st.altair_chart(graph2, use_container_width=True)
         with col2:
-            # グラフ③: CPA ALL vs 変化率
-            bar_cpa = base_all.mark_bar(color="green").encode(y=alt.Y("CPA", axis=alt.Axis(title="CPA")))
-            line_cpa = base_all.mark_line(color="orange").encode(y=alt.Y("CPA変化率", axis=alt.Axis(title="変化率")))
-            chart3 = alt.layer(bar_cpa, line_cpa).resolve_scale(y='independent').properties(title="グラフ③: CPA ALL + 変化率")
-            st.altair_chart(chart3, use_container_width=True)
+            graph3 = alt.layer(
+                alt.Chart(all_section).mark_bar(color="green").encode(
+                    x=alt.X("週", sort=week_order_all),
+                    y="CPA",
+                    tooltip=["週", "CPA"]
+                ),
+                alt.Chart(all_section).mark_line(color="red").encode(
+                    x="週",
+                    y=alt.Y("CPA変化率", axis=alt.Axis(format=".1f%")),
+                    tooltip=["週", alt.Tooltip("CPA変化率", format=".1f%")]
+                )
+            ).resolve_scale(y='independent').properties(title="グラフ③: CPA ALL + 変化率")
+            st.altair_chart(graph3, use_container_width=True)
 
     elif option == "AFF":
         col1, col2 = st.columns(2)
         with col1:
-            # グラフ④: AFF件数 vs 変化率
-            base_aff = alt.Chart(aff_sem_section).encode(x=alt.X("AFF週", sort=week_order))
-            bar_aff_cv = base_aff.mark_bar(color="steelblue").encode(y=alt.Y("AFF件数", axis=alt.Axis(title="件数")))
-            line_aff_cv = base_aff.mark_line(color="orange").encode(y=alt.Y("AFF変化率", axis=alt.Axis(title="変化率")))
-            chart4 = alt.layer(bar_aff_cv, line_aff_cv).resolve_scale(y='independent').properties(title="グラフ④: AFF 件数 + 変化率")
-            st.altair_chart(chart4, use_container_width=True)
+            graph4 = alt.layer(
+                alt.Chart(aff_sem_section).mark_bar(color="steelblue").encode(
+                    x=alt.X("AFF_週", sort=week_order_aff),
+                    y="AFF件数",
+                    tooltip=["AFF_週", "AFF件数"]
+                ),
+                alt.Chart(aff_sem_section).mark_line(color="orange").encode(
+                    x="AFF_週",
+                    y=alt.Y("AFF変化率", axis=alt.Axis(format=".1f%")),
+                    tooltip=["AFF_週", alt.Tooltip("AFF変化率", format=".1f%")]
+                )
+            ).resolve_scale(y='independent').properties(title="グラフ④: AFF 件数 + 変化率")
+            st.altair_chart(graph4, use_container_width=True)
         with col2:
-            # グラフ⑤: AFF CPA vs 変化率
-            bar_aff_cpa = base_aff.mark_bar(color="green").encode(y=alt.Y("AFFCPA", axis=alt.Axis(title="CPA")))
-            line_aff_cpa = base_aff.mark_line(color="orange").encode(y=alt.Y("AFFCPA変化率", axis=alt.Axis(title="変化率")))
-            chart5 = alt.layer(bar_aff_cpa, line_aff_cpa).resolve_scale(y='independent').properties(title="グラフ⑤: AFF CPA + 変化率")
-            st.altair_chart(chart5, use_container_width=True)
+            graph5 = alt.layer(
+                alt.Chart(aff_sem_section).mark_bar(color="green").encode(
+                    x=alt.X("AFF_週", sort=week_order_aff),
+                    y="AFF_CPA",
+                    tooltip=["AFF_週", "AFF_CPA"]
+                ),
+                alt.Chart(aff_sem_section).mark_line(color="red").encode(
+                    x="AFF_週",
+                    y=alt.Y("AFF_CPA変化率", axis=alt.Axis(format=".1f%")),
+                    tooltip=["AFF_週", alt.Tooltip("AFF_CPA変化率", format=".1f%")]
+                )
+            ).resolve_scale(y='independent').properties(title="グラフ⑤: AFF CPA + 変化率")
+            st.altair_chart(graph5, use_container_width=True)
 
     else:
         col1, col2 = st.columns(2)
         with col1:
-            # グラフ⑥: SEM件数 vs 変化率
-            base_sem = alt.Chart(aff_sem_section).encode(x=alt.X("SEM週", sort=week_order))
-            bar_sem_cv = base_sem.mark_bar(color="steelblue").encode(y=alt.Y("SEM件数", axis=alt.Axis(title="件数")))
-            line_sem_cv = base_sem.mark_line(color="orange").encode(y=alt.Y("SEM変化率", axis=alt.Axis(title="変化率")))
-            chart6 = alt.layer(bar_sem_cv, line_sem_cv).resolve_scale(y='independent').properties(title="グラフ⑥: SEM 件数 + 変化率")
-            st.altair_chart(chart6, use_container_width=True)
+            graph6 = alt.layer(
+                alt.Chart(aff_sem_section).mark_bar(color="steelblue").encode(
+                    x=alt.X("SEM_週", sort=week_order_aff),
+                    y="SEM件数",
+                    tooltip=["SEM_週", "SEM件数"]
+                ),
+                alt.Chart(aff_sem_section).mark_line(color="orange").encode(
+                    x="SEM_週",
+                    y=alt.Y("SEM変化率", axis=alt.Axis(format=".1f%")),
+                    tooltip=["SEM_週", alt.Tooltip("SEM変化率", format=".1f%")]
+                )
+            ).resolve_scale(y='independent').properties(title="グラフ⑥: SEM 件数 + 変化率")
+            st.altair_chart(graph6, use_container_width=True)
         with col2:
-            # グラフ⑦: SEM CPA vs 変化率
-            bar_sem_cpa = base_sem.mark_bar(color="green").encode(y=alt.Y("SEMCPA", axis=alt.Axis(title="CPA")))
-            line_sem_cpa = base_sem.mark_line(color="orange").encode(y=alt.Y("SEMCPA変化率", axis=alt.Axis(title="変化率")))
-            chart7 = alt.layer(bar_sem_cpa, line_sem_cpa).resolve_scale(y='independent').properties(title="グラフ⑦: SEM CPA + 変化率")
-            st.altair_chart(chart7, use_container_width=True)
+            graph7 = alt.layer(
+                alt.Chart(aff_sem_section).mark_bar(color="green").encode(
+                    x=alt.X("SEM_週", sort=week_order_aff),
+                    y="SEM_CPA変化率",
+                    tooltip=["SEM_週", "SEM_CPA変化率"]
+                ),
+                alt.Chart(aff_sem_section).mark_line(color="red").encode(
+                    x="SEM_週",
+                    y=alt.Y("SEM_CPA変化率", axis=alt.Axis(format=".1f%")),
+                    tooltip=["SEM_週", alt.Tooltip("SEM_CPA変化率", format=".1f%")]
+                )
+            ).resolve_scale(y='independent').properties(title="グラフ⑦: SEM CPA + 変化率")
+            st.altair_chart(graph7, use_container_width=True)
