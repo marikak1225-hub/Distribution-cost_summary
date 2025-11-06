@@ -5,25 +5,17 @@ import os
 from io import BytesIO
 from datetime import date
 
-# ページ設定
 st.set_page_config(layout="wide")
-st.title("📊 期間中CV・配信費集計ツール + 領域別コンディション分析")
+st.title("📊 期間中CV・配信費集計ツール")
 
-# -------------------------
-# AFマスター読み込み
-# -------------------------
 @st.cache_data
 def load_af_master(path):
     return pd.read_excel(path, usecols="B:D", header=1, engine="openpyxl")
 
 af_path = "AFマスター.xlsx"
-condition_path = "領域別コンディション.xlsx"
-
-# -------------------------
-# CV・配信費集計
-# -------------------------
-st.subheader("📑 CV・配信費集計")
-if os.path.exists(af_path):
+if not os.path.exists(af_path):
+    st.error("AFマスター.xlsxがアプリフォルダにありません。配置してください。")
+else:
     af_df = load_af_master(af_path)
     af_df.columns = ["AFコード", "媒体", "分類"]
 
@@ -41,7 +33,9 @@ if os.path.exists(af_path):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
 
+        # -------------------------
         # CVデータ集計
+        # -------------------------
         if test_file:
             st.subheader("申込データ集計結果")
             test_df = pd.read_excel(test_file, header=0, engine="openpyxl")
@@ -52,8 +46,7 @@ if os.path.exists(af_path):
                 (test_df["日付"] <= pd.to_datetime(end_date))
             ]
 
-            mapping = af_df.set_index("AFコード")["媒体"].to_dict()
-            mapping_cat = af_df.set_index("AFコード")["分類"].to_dict()
+            mapping = af_df.set_index("AFコード")[["媒体", "分類"]].to_dict("index")
             ad_codes = test_df.columns[1:]
             affiliate_prefixes = ["GEN", "AFA", "AFP", "RAA"]
 
@@ -63,8 +56,8 @@ if os.path.exists(af_path):
                     media = "Affiliate"
                     category = "Affiliate"
                 elif code in mapping:
-                    media = mapping[code]
-                    category = mapping_cat[code]
+                    media = mapping[code]["媒体"]
+                    category = mapping[code]["分類"]
                 else:
                     continue
 
@@ -75,9 +68,12 @@ if os.path.exists(af_path):
             st.dataframe(grouped)
             grouped.to_excel(writer, index=False, sheet_name="申込件数")
 
-        # 配信費集計
+        # -------------------------
+        # 配信費集計（ピボット＋グラフ）
+        # -------------------------
         if cost_file:
             st.subheader("配信費集計結果")
+
             xls = pd.ExcelFile(cost_file)
             target_sheets = [s for s in xls.sheet_names if any(k in s for k in ["Listing", "Display", "affiliate"])]
 
@@ -133,6 +129,7 @@ if os.path.exists(af_path):
                         ordered_cols = [col for col in desired_order if col in pivot_df.columns]
                         pivot_df = pivot_df[ordered_cols]
 
+                    # ✅ 合計行を追加（空でない場合のみ）
                     if not pivot_df.empty and len(pivot_df.columns) > 0:
                         pivot_df.loc["合計"] = pivot_df.sum(numeric_only=True)
 
@@ -151,14 +148,16 @@ if os.path.exists(af_path):
 
                     pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_集計")
 
+    # ✅ ExcelWriterの外でseek(0)を呼び出す
     output.seek(0)
+
+    # ✅ ダウンロードボタンを最終的に表示
     st.download_button(
         label="📥 全集計Excelをダウンロード",
         data=output.getvalue(),
         file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-
 # -------------------------
 # 領域別コンディション分析
 # -------------------------
