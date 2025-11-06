@@ -49,7 +49,6 @@ start_date, end_date = st.date_input(
     min_value=default_start,
     max_value=default_end
 )
-    st.warning("⚠️ 開始日が終了日より後になっています。")
 
 # CVデータ集計
 if test_file:
