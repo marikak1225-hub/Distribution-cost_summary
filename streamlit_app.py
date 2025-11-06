@@ -127,8 +127,19 @@ if cost_file:
 
             pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
 
-            # ✅ 縦並び表示は削除
             cost_results.append((sheet_type, pivot_df))
+
+            # ✅ ListingとDisplayは縦並び表示を復活
+            if sheet_type in ["Listing", "Display"]:
+                st.subheader(f"{sheet_type} の集計結果")
+                col_table, col_chart = st.columns([1, 1.5])
+                with col_table:
+                    st.dataframe(pivot_df)
+                with col_chart:
+                    chart = alt.Chart(daily_grouped).mark_line().encode(
+                        x="日付:T", y="金額:Q", color="項目:N"
+                    ).properties(title=f"{sheet_type} 配信費推移", width=500, height=300)
+                    st.altair_chart(chart, use_container_width=True)
 
 # Excel出力
 with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
