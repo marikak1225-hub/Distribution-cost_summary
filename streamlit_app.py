@@ -1,11 +1,11 @@
 import streamlit as st
 import pandas as pd
+import altair as alt
 import os
 from io import BytesIO
 from datetime import date
-import altair as alt
 
-# Streamlit page config
+# ページ設定
 st.set_page_config(layout="wide")
 st.title("📊 期間中CV・配信費集計ツール + 領域別コンディション分析")
 
@@ -17,15 +17,17 @@ def load_af_master(path):
     return pd.read_excel(path, usecols="B:D", header=1, engine="openpyxl")
 
 af_path = "AFマスター.xlsx"
+condition_path = "領域別コンディション.xlsx"
+
+# -------------------------
+# CV・配信費集計
+# -------------------------
 if not os.path.exists(af_path):
     st.error("AFマスター.xlsxがアプリフォルダにありません。配置してください。")
 else:
     af_df = load_af_master(af_path)
     af_df.columns = ["AFコード", "媒体", "分類"]
 
-    # -------------------------
-    # ファイルアップロード
-    # -------------------------
     col1, col2 = st.columns(2)
     with col1:
         test_file = st.file_uploader("CVデータ（publicに変更）", type="xlsx", key="cv")
@@ -40,9 +42,7 @@ else:
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
 
-        # -------------------------
         # CVデータ集計
-        # -------------------------
         if test_file:
             st.subheader("申込データ集計結果")
             test_df = pd.read_excel(test_file, header=0, engine="openpyxl")
@@ -76,12 +76,9 @@ else:
             st.dataframe(grouped)
             grouped.to_excel(writer, index=False, sheet_name="申込件数")
 
-        # -------------------------
-        # 配信費集計（ピボット＋グラフ）
-        # -------------------------
+        # 配信費集計
         if cost_file:
             st.subheader("配信費集計結果")
-
             xls = pd.ExcelFile(cost_file)
             target_sheets = [s for s in xls.sheet_names if any(k in s for k in ["Listing", "Display", "affiliate"])]
 
@@ -128,7 +125,7 @@ else:
                 if daily_rows:
                     daily_df = pd.concat(daily_rows)
                     daily_grouped = daily_df.groupby(["日付", "項目"], as_index=False)["金額"].sum()
-                    daily_grouped["日付"] = pd.to_datetime(daily_grouped["日付"])
+                    daily_grouped["日付"] = pd.to_datetime(daily_grouped["日付"]).dt.strftime("%Y/%m/%d")
                     daily_grouped = daily_grouped.sort_values(by=["項目", "日付"])
 
                     pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
@@ -155,16 +152,13 @@ else:
 
                     pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_集計")
 
-    # ExcelWriterの外でseek(0)
     output.seek(0)
-
     st.download_button(
         label="📥 全集計Excelをダウンロード",
         data=output.getvalue(),
         file_name=f"申込件数配信費集計_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-
 
 # -------------------------
 # 領域別コンディション分析
