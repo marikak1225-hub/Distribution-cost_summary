@@ -6,7 +6,7 @@ from datetime import date
 
 # ページ設定
 st.set_page_config(layout="wide")
-st.title("📊 期間中CV・配信費集計ツール　")
+st.title("📊 期間中CV・配信費集計ツール + 領域別コンディション分析")
 
 # -------------------------
 # AFマスター読み込み（クラウド固定）
@@ -28,23 +28,20 @@ col1, col2 = st.columns(2)
 with col1:
     test_file = st.file_uploader("CVデータ（publicに変更）", type="xlsx", key="cv")
 with col2:
-    cost_file = st.file_uploader("コストレポート（パスワード解除・必要シート・必要行のみUP)", type="xlsx", key="cost")
+    cost_file = st.file_uploader("コストレポート（必要シート・必要行のみUP)", type="xlsx", key="cost")
 
-# 初期値（アップロード前は今日）
+# コストレポートからデフォルト期間取得
 default_start = date.today()
 default_end = date.today()
-
 if cost_file:
     xls = pd.ExcelFile(cost_file)
     target_sheets = [s for s in xls.sheet_names if any(k in s for k in ["Listing", "Display", "affiliate"])]
-
     all_dates = []
     for sheet in target_sheets:
         df = pd.read_excel(xls, sheet_name=sheet, engine="openpyxl")
         date_col_index = 1 if "Listing" in sheet or "Display" in sheet else 0
         df.iloc[:, date_col_index] = pd.to_datetime(df.iloc[:, date_col_index], errors="coerce")
         all_dates.extend(df.iloc[:, date_col_index].dropna().tolist())
-
     if all_dates:
         default_start = min(all_dates).date()
         default_end = max(all_dates).date()
@@ -56,12 +53,16 @@ start_date, end_date = st.date_input(
     min_value=default_start,
     max_value=default_end
 )
+if start_date > end_date:
+    st.warning("⚠️ 開始日が終了日より後になっています。")
 
 # CVデータ集計
 if test_file:
     st.subheader("申込データ集計結果")
     test_df = pd.read_excel(test_file, header=0, engine="openpyxl")
-    test_df["日付"] = pd.to_datetime(test_df.iloc[:, 0], errors="coerce")
+
+    # ✅ 日付フォーマットをYYYYMMDD固定で変換
+    test_df["日付"] = pd.to_datetime(test_df.iloc[:, 0], format="%Y%m%d", errors="coerce")
 
     filtered = test_df[(test_df["日付"] >= pd.to_datetime(start_date)) & (test_df["日付"] <= pd.to_datetime(end_date))]
 
