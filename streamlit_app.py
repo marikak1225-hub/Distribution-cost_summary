@@ -10,7 +10,7 @@ st.set_page_config(layout="wide")
 st.title("📊 期間中CV・配信費集計ツール + 領域別コンディション分析")
 
 # -------------------------
-# AFマスター読み込み（クラウド固定）
+# AFマスター読み込み
 # -------------------------
 af_path = "AFマスター.xlsx"
 af_df = pd.read_excel(af_path, usecols="B:D", header=1, engine="openpyxl")
@@ -140,13 +140,6 @@ if cost_file:
                         use_container_width=True
                     )
 
-# Excel出力（CV + 配信費）
-with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-    if cv_result is not None:
-        cv_result.to_excel(writer, index=False, sheet_name="申込件数")
-    for sheet_type, pivot_df in cost_results:
-        pivot_df.to_excel(writer, sheet_name=f"{sheet_type}_集計")
-
 # -------------------------
 # 領域別コンディション分析
 # -------------------------
@@ -164,6 +157,11 @@ aff_sem_section.columns = [
     "AFF_週", "AFF件数", "AFF変化率", "AFFCPA", "AFFCPA変化率",
     "SEM_週", "SEM件数", "SEM変化率", "SEMCPA", "SEMCPA変化率"
 ]
+
+# ✅ 週列正規化
+all_section["週"] = all_section["週"].astype(str).str.strip()
+aff_sem_section["AFF_週"] = aff_sem_section["AFF_週"].astype(str).str.strip()
+aff_sem_section["SEM_週"] = aff_sem_section["SEM_週"].astype(str).str.strip()
 
 # 数値変換
 for col in ["変化率", "CPA変化率"]:
@@ -193,7 +191,7 @@ def draw_chart(df, week_col, count_col, rate_col, cpa_col, cpa_rate_col, title_p
                     tooltip=[week_col, count_col, rate_col]
                 ),
                 alt.Chart(df).mark_line(color="orange").encode(
-                    x=f"{week_col}:N",
+                    x=alt.X(f"{week_col}:N", sort=week_order),
                     y=alt.Y(f"{rate_col}:Q", axis=alt.Axis(format=".1%", title="変化率")),
                     tooltip=[week_col, rate_col]
                 ),
@@ -210,7 +208,7 @@ def draw_chart(df, week_col, count_col, rate_col, cpa_col, cpa_rate_col, title_p
                     tooltip=[week_col, cpa_col, cpa_rate_col]
                 ),
                 alt.Chart(df).mark_line(color="orange").encode(
-                    x=f"{week_col}:N",
+                    x=alt.X(f"{week_col}:N", sort=week_order),
                     y=alt.Y(f"{cpa_rate_col}:Q", axis=alt.Axis(format=".1%", title="CPA変化率")),
                     tooltip=[week_col, cpa_rate_col]
                 ),
@@ -228,7 +226,7 @@ elif option == "AFF":
 else:
     draw_chart(aff_sem_section, "SEM_週", "SEM件数", "SEM変化率", "SEMCPA", "SEMCPA変化率", "SEM")
 
-# Excel出力（コンディション分析も追加）
+# ✅ Excel出力（CV + 配信費 + コンディション分析）
 with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
     if cv_result is not None:
         cv_result.to_excel(writer, index=False, sheet_name="申込件数")
