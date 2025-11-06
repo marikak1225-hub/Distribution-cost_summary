@@ -30,11 +30,26 @@ with col1:
 with col2:
     cost_file = st.file_uploader("コストレポート（パスワード解除・必要シート・必要行のみUP)", type="xlsx", key="cost")
 
-# 初期値（アップロード前は今日の日付）
+# 初期値（アップロード前は今日）
 default_start = date.today()
 default_end = date.today()
 
-# date_inputに反映
+if cost_file:
+    xls = pd.ExcelFile(cost_file)
+    target_sheets = [s for s in xls.sheet_names if any(k in s for k in ["Listing", "Display", "affiliate"])]
+
+    all_dates = []
+    for sheet in target_sheets:
+        df = pd.read_excel(xls, sheet_name=sheet, engine="openpyxl")
+        date_col_index = 1 if "Listing" in sheet or "Display" in sheet else 0
+        df.iloc[:, date_col_index] = pd.to_datetime(df.iloc[:, date_col_index], errors="coerce")
+        all_dates.extend(df.iloc[:, date_col_index].dropna().tolist())
+
+    if all_dates:
+        default_start = min(all_dates).date()
+        default_end = max(all_dates).date()
+
+# 集計期間選択
 start_date, end_date = st.date_input(
     "集計期間を選択",
     value=(default_start, default_end),
