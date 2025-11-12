@@ -83,6 +83,8 @@ if test_file:
         result_list.append({"広告コード": code, "媒体": media, "分類": category, "CV合計": cv_sum})
 
     cv_result = pd.DataFrame(result_list).groupby(["分類", "媒体"], as_index=False)["CV合計"].sum()
+    # ✅ CV日割り列追加
+    cv_result["CV日割り"] = (cv_result["CV合計"] / 7).round(2)
     st.dataframe(cv_result)
 
 # 配信費集計
@@ -124,6 +126,11 @@ if cost_file:
             daily_grouped["日付"] = pd.to_datetime(daily_grouped["日付"]).dt.strftime("%Y/%m/%d")
 
             pivot_df = daily_grouped.pivot(index="日付", columns="項目", values="金額").fillna(0)
+            # ✅ 合計行追加
+            total_row = pd.DataFrame(pivot_df.sum()).T
+            total_row.index = ["合計"]
+            pivot_df = pd.concat([pivot_df, total_row])
+
             cost_results.append((sheet_type, pivot_df))
 
             # グラフ表示
