@@ -7,7 +7,7 @@ import re
 
 # ページ設定
 st.set_page_config(layout="wide")
-st.title("📊 期間中CV・配信費集計ツール + 領域別コンディション分析")
+st.title("📊 期間中CV・配信費集計ツール")
 
 # -------------------------
 # AFマスター読み込み
