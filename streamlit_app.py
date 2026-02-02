@@ -3,15 +3,11 @@ import pandas as pd
 from io import BytesIO
 from datetime import date
 
-# -----------------------------
 # ページ設定
-# -----------------------------
 st.set_page_config(layout="wide")
 st.title("📊 期間中CV・配信費集計ツール（Affiliate + Listing）")
 
-# -----------------------------
 # AFマスター読み込み
-# -----------------------------
 af_path = "AFマスター.xlsx"
 af_df = pd.read_excel(af_path, usecols="B:D", header=1, engine="openpyxl")
 af_df.columns = ["AFコード", "媒体", "分類"]
@@ -19,9 +15,7 @@ af_df.columns = ["AFコード", "媒体", "分類"]
 # Displayは完全削除対象なので、マスター上も除外（保険）
 af_df = af_df[~af_df["分類"].astype(str).str.contains("Display", case=False, na=False)].copy()
 
-# -----------------------------
 # アップロード
-# -----------------------------
 st.header("📑 CV・配信費集計（シンプル版）")
 
 col1, col2 = st.columns(2)
@@ -30,9 +24,7 @@ with col1:
 with col2:
     cost_file = st.file_uploader("コストレポート（必要シート・必要行のみUP）", type="xlsx", key="cost")
 
-# -----------------------------
 # 期間のデフォルト値作成（コスト優先 → なければCVから）
-# -----------------------------
 default_start = date.today()
 default_end = date.today()
 
@@ -75,9 +67,7 @@ elif cv_file:
     if mm:
         default_start, default_end = mm
 
-# -----------------------------
 # 期間選択
-# -----------------------------
 start_date, end_date = st.date_input(
     "集計期間を選択",
     value=(default_start, default_end)
@@ -91,9 +81,7 @@ if start_date > end_date:
 days = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days + 1
 st.caption(f"📅 集計日数：{days}日（{start_date} ～ {end_date}）")
 
-# -----------------------------
 # CV集計（Affiliate + Listingのみ）
-# -----------------------------
 cv_result_base = None
 
 if cv_file:
@@ -147,10 +135,8 @@ if cv_file:
 
     st.dataframe(cv_result_base, use_container_width=True)
 
-# -----------------------------
 # コスト集計（Listing + Affiliateのみ、Display削除）
 # 期間中合計のみ作成（E列用）
-# -----------------------------
 cost_summary = {
     "Affiliate_total": 0.0,
     "Listing_total": 0.0,
@@ -237,9 +223,7 @@ if cost_file:
     ])
     st.dataframe(cost_view, use_container_width=True)
 
-# -----------------------------
 # 追加合計行（CV＆費用）を「申込件数」シート用に作成
-# -----------------------------
 final_df = None
 
 def _sum_cv(df, category_filter=None, media_in=None):
@@ -349,9 +333,7 @@ if cv_result_base is not None:
     st.subheader("📌 出力用テーブル（CV + 日割り + 合計行 + 費用E列）")
     st.dataframe(final_df, use_container_width=True)
 
-# -----------------------------
 # Excel出力（シート1枚：申込件数のみ）
-# -----------------------------
 output = BytesIO()
 
 with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
