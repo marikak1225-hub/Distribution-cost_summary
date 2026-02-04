@@ -94,7 +94,9 @@ if start_date > end_date:
 days = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days + 1
 st.caption(f"📅 集計日数：{days}日（{start_date} ～ {end_date}）")
 
+# ---------------------------
 # CV集計（Affiliate + Listing）
+# ---------------------------
 cv_result_base = None
 
 if cv_file:
@@ -131,32 +133,33 @@ if cv_file:
         if str(category).lower() == "display" or "display" in str(category).lower():
             continue
 
-        # 媒体ラベル寄せ
+        # 媒体ラベル寄せ（PSD→Yahoo単体）
         media = _alias_media(media)
 
         cv_sum = pd.to_numeric(filtered[code], errors="coerce").fillna(0).sum()
         result_list.append({"分類": category, "媒体": media, "CV合計": cv_sum})
 
-    cv_result_base = (
-        pd.DataFrame(result_list)
-        .groupby(["分類", "媒体"], as_index=False)["CV合計"]
-        .sum()
-    )
+    if len(result_list) == 0:
+        st.warning("⚠️ 集計対象の列が見つからない（マスタ未紐付け or 期間内データなし）可能性があります。")
+    else:
+        cv_result_base = (
+            pd.DataFrame(result_list)
+            .groupby(["分類", "媒体"], as_index=False)["CV合計"]
+            .sum()
+        )
 
-    # CV日割り：選択日数
-    cv_result_base["CV日割り"] = (cv_result_base["CV合計"] / days).round(2)
+        # CV日割り：選択日数
+        cv_result_base["CV日割り"] = (cv_result_base["CV合計"] / days).round(2)
 
-    # 表示用に順序
-    cv_result_base = cv_result_base.sort_values(["分類", "媒体"]).reset_index(drop=True)
+        # 表示用に順序
+        cv_result_base = cv_result_base.sort_values(["分類", "媒体"]).reset_index(drop=True)
 
-    st.dataframe(cv_result_base, use_container_width=True)
+        st.dataframe(cv_result_base, use_container_width=True)
 
 # コスト集計（Listing + Affiliate）
-# 期間中合計のみ作成
 cost_summary = {
     "Affiliate_total": 0.0,
     "Listing_total": 0.0,
-    # Listing内訳（CV側の媒体名と合わせるため LS_ プレフィックスに揃える）
     "LS_Google単体": 0.0,
     "LS_Google単体以外": 0.0,
     "LS_Googleその他": 0.0,
@@ -165,10 +168,10 @@ cost_summary = {
     "LS_MS単体": 0.0,
     "LS_MS単体以外": 0.0,
 
-    # 参考ラベル（その他はコスト発生しない）
+    # 参考ラベル（コスト発生しない前提）
     "LS_Google単体→2025年11月よりMSその他": 0.0,
 
-    # PSDはYahoo単体へ寄せる→コスト側では独立値なし
+    # PSDはYahoo単体へ寄せる（独立値は基本持たない）
     "LS_Yahoo単体（PSD）": 0.0,
 }
 
@@ -178,7 +181,6 @@ if cost_file:
     xls = pd.ExcelFile(cost_file)
     target_sheets = [s for s in xls.sheet_names if ("listing" in s.lower()) or ("affiliate" in s.lower())]
 
-    # 元コードの列indexを踏襲（Listing/affiliate）
     listing_cols = {
         "Listing_total": 17,
         "LS_Google単体": 53,
@@ -194,7 +196,6 @@ if cost_file:
         "Affiliate_total": 20
     }
 
-    # 期間フィルタして合計
     for sheet in target_sheets:
         df = pd.read_excel(xls, sheet_name=sheet, engine="openpyxl")
         sheet_type = "Listing" if "listing" in sheet.lower() else "Affiliate"
@@ -216,14 +217,12 @@ if cost_file:
                 if idx < len(filtered_df.columns):
                     cost_summary[k] += pd.to_numeric(filtered_df.iloc[:, idx], errors="coerce").fillna(0).sum()
 
-    # YahooPSDをYahoo単体へ寄せる（コスト側にPSD独立列が無い前提で 0 のまま）
+    # PSDをYahoo単体へ寄せ（将来PSD列が来ても二重計上しない）
     cost_summary["LS_Yahoo単体"] += cost_summary.get("LS_Yahoo単体（PSD）", 0.0)
     cost_summary["LS_Yahoo単体（PSD）"] = 0.0
 
-    # LS_Google単体→2025年11月よりMSその他はコスト発生しない
-    # cost_summary["LS_Google単体→2025年11月よりMSその他"] は変更しない
+    # MSその他はコスト寄せ不要（0のまま）
 
-    # 表示用（簡易テーブル）※YahooPSD行は寄せたので表示しない
     cost_view = pd.DataFrame([
         {"項目": "Listing 合計", "金額": cost_summary["Listing_total"]},
         {"項目": "Affiliate 合計", "金額": cost_summary["Affiliate_total"]},
@@ -238,15 +237,10 @@ if cost_file:
     ])
     st.dataframe(cost_view, use_container_width=True)
 
-# 追加合計行（CV＆費用）を「集計結果」シート用に作成
+# 合計（CV＆費用）
 final_df = None
 
 def _sum_cv(df, category_filter=None, media_in=None):
-    """
-    df: cv_result_base（分類/媒体/CV合計/CV日割り）
-    category_filter: 分類でフィルタ（例: "Listing"）
-    media_in: 媒体のリストでフィルタ（B列条件）
-    """
     if df is None or len(df) == 0:
         return 0.0
 
@@ -262,19 +256,17 @@ def _sum_cv(df, category_filter=None, media_in=None):
     return float(pd.to_numeric(tmp["CV合計"], errors="coerce").fillna(0).sum())
 
 def _make_summary_rows(df):
-    # YahooPSDをYahoo単体に寄せるため、YahooPSDを除外
     google_medias = ["LS_Googleその他", "LS_Google単体", "LS_Google単体以外"]
     yahoo_medias = ["", "LS_Yahoo単体", "LS_Yahoo単体以外"]
-    # CV側は「LS_Google単体→2025年11月よりMSその他」をMicrosoftとして含める（コストは別途0）
+    # CV側はMSその他ラベルをMicrosoft扱いで含める（費用は0）
     ms_medias = ["LS_MS単体", "LS_MS単体以外", "LS_Google単体→2025年11月よりMSその他"]
-
     tan_medias = ["LS_Google単体", "LS_Yahoo単体", "LS_MS単体"]
     brand_medias = ["LS_Google単体以外", "LS_Yahoo単体以外", "LS_MS単体以外"]
     other_medias = ["LS_Google単体→2025年11月よりMSその他", "LS_Googleその他"]
 
     rows = []
 
-    # CV合計（C/D）
+    # CV合計
     cv_all = _sum_cv(df, category_filter="Affiliate") + _sum_cv(df, category_filter="Listing")
     cv_sem = _sum_cv(df, category_filter="Listing")
     cv_google = _sum_cv(df, category_filter="Listing", media_in=google_medias)
@@ -284,7 +276,7 @@ def _make_summary_rows(df):
     cv_brand = _sum_cv(df, category_filter="Listing", media_in=brand_medias)
     cv_other = _sum_cv(df, category_filter="Listing", media_in=other_medias)
 
-    # 費用合計（E）
+    # 費用合計
     cost_all = cost_summary.get("Affiliate_total", 0.0) + cost_summary.get("Listing_total", 0.0)
     cost_sem = cost_summary.get("Listing_total", 0.0)
 
@@ -297,10 +289,12 @@ def _make_summary_rows(df):
         cost_summary.get("LS_Yahoo単体", 0.0) +
         cost_summary.get("LS_Yahoo単体以外", 0.0)
     )
+    # ★MSその他コストは0のまま → cost_msには含めない
     cost_ms = (
         cost_summary.get("LS_MS単体", 0.0) +
         cost_summary.get("LS_MS単体以外", 0.0)
     )
+
     cost_tan = (
         cost_summary.get("LS_Google単体", 0.0) +
         cost_summary.get("LS_Yahoo単体", 0.0) +
@@ -311,6 +305,9 @@ def _make_summary_rows(df):
         cost_summary.get("LS_Yahoo単体以外", 0.0) +
         cost_summary.get("LS_MS単体以外", 0.0)
     )
+
+    # その他費用：Googleその他 + （空欄は費用なし想定）
+    cost_other = cost_summary.get("LS_Googleその他", 0.0)
 
     def add_row(name, cv_total, cost_total):
         rows.append({
@@ -328,24 +325,18 @@ def _make_summary_rows(df):
     add_row("Microsoft", cv_ms, cost_ms)
     add_row("単体", cv_tan, cost_tan)
     add_row("ブランド", cv_brand, cost_brand)
-    add_row("その他", cv_other)
+    add_row("その他", cv_other, cost_other)
 
     return pd.DataFrame(rows)
 
 # 媒体行へ費用を入れる
 def _apply_cost_to_media_rows(base_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    base_df: cv_result_baseをベースにした通常行（分類/媒体/CV合計/CV日割り/合計費用）
-    指定された媒体（B列）の行にのみ、E列（合計費用）へ期間合計費用を入れる
-    """
     if base_df is None or len(base_df) == 0:
         return base_df
     if not cost_file:
         return base_df
 
-    # 指定媒体ごとの費用（期間合計）
-    # Yahoo単体はYahooPSDを寄せ済み
-    # LS_Google単体→2025年11月よりMSその他コストなし
+    # MSその他はコスト寄せ不要 → mapに入れない（空欄）
     media_cost_map = {
         "Affiliate": cost_summary.get("Affiliate_total", 0.0),
         "LS_Googleその他": cost_summary.get("LS_Googleその他", 0.0),
@@ -363,16 +354,15 @@ def _apply_cost_to_media_rows(base_df: pd.DataFrame) -> pd.DataFrame:
     def _pick_cost(media_norm: str):
         if media_norm in media_cost_map:
             return round(float(media_cost_map[media_norm]), 0)
-        return ""  # 指定外は空欄
+        return ""
 
     base_df["合計費用"] = base_df["媒体_norm"].apply(_pick_cost)
     base_df.drop(columns=["媒体_norm"], inplace=True)
     return base_df
 
 # final_df作成
-if cv_result_base is not None:
+if cv_result_base is not None and len(cv_result_base) > 0:
     base = cv_result_base.copy()
-
     base["媒体"] = base["媒体"].apply(_alias_media)
 
     base["合計費用"] = ""
@@ -381,27 +371,26 @@ if cv_result_base is not None:
     summary_rows = _make_summary_rows(base)
     final_df = pd.concat([base, summary_rows], ignore_index=True)
 
-    st.subheader(" 出力用テーブル（CV + 日割り + 合計行 + 費用）")
+    st.subheader("　出力用テーブル（CV + 日割り + 合計行 + 費用）")
     st.dataframe(final_df, use_container_width=True)
 
 # Excel出力
-output = BytesIO()
-
-with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-    if final_df is not None:
+if final_df is not None and len(final_df) > 0:
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         final_df.to_excel(writer, index=False, sheet_name="申込件数")
 
-        # 参考（期間）
         ws = writer.sheets["申込件数"]
         ws.write(0, 6, "集計期間")  # G1
         ws.write(0, 7, f"{start_date} ～ {end_date}")  # H1
         ws.write(1, 6, "集計日数")  # G2
         ws.write(1, 7, days)  # H2
 
-# ダウンロードボタン
-st.download_button(
-    "📥 集計結果をダウンロード",
-    data=output.getvalue(),
-    file_name=f"集計結果_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
+    st.download_button(
+        "📥 集計結果をダウンロード",
+        data=output.getvalue(),
+        file_name=f"集計結果_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+else:
+    st.info("📌 集計が完了するとダウンロードボタンが表示されます。")
