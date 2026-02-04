@@ -7,37 +7,37 @@ from datetime import date
 st.set_page_config(layout="wide")
 st.title("📊 期間中CV・配信費集計ツール（Affiliate + Listing）")
 
-# ====== 文字列正規化（改行/スペース除去） ======
+# 文字列正規化（改行/スペース除去）
 def _norm_text(x) -> str:
     if x is None:
         return ""
     return str(x).replace("\r", "").replace("\n", "").strip()
 
-# AFマスター読み込み
+# AFマスタ読込み
 af_path = "AFマスター.xlsx"
 af_df = pd.read_excel(af_path, usecols="B:D", header=1, engine="openpyxl")
 af_df.columns = ["AFコード", "媒体", "分類"]
 
-# Displayは完全削除対象なので、マスター上も除外（保険）
+# Display除外
 af_df = af_df[~af_df["分類"].astype(str).str.contains("Display", case=False, na=False)].copy()
 
 # アップロード
-st.header("📑 CV・配信費集計（シンプル版）")
+st.header("📑 CV・配信費集計")
 
 col1, col2 = st.columns(2)
 with col1:
     cv_file = st.file_uploader("CVデータ（publicに変更）", type="xlsx", key="cv")
 with col2:
-    cost_file = st.file_uploader("コストレポート（必要シート・必要行のみUP）", type="xlsx", key="cost")
+    cost_file = st.file_uploader("コストレポート（パスワードなし・必要シート・必要行のみUP）", type="xlsx", key="cost")
 
-# 期間のデフォルト値作成（コスト優先 → なければCVから）
+# 期間のデフォルト値作成（コストレポートの期間 → なければ申込データの期間から）
 default_start = date.today()
 default_end = date.today()
 
 def _safe_minmax_dates_from_cost(file):
     try:
         xls = pd.ExcelFile(file)
-        # Display除外：Listing/affiliate のみ
+        # Listing/affiliate のみ
         target_sheets = [s for s in xls.sheet_names if ("listing" in s.lower()) or ("affiliate" in s.lower())]
         all_dates = []
         for sheet in target_sheets:
@@ -55,7 +55,7 @@ def _safe_minmax_dates_from_cost(file):
 def _safe_minmax_dates_from_cv(file):
     try:
         df = pd.read_excel(file, header=0, engine="openpyxl")
-        # 先頭列がYYYYMMDD想定
+        # YYYYMMDD
         dt = pd.to_datetime(df.iloc[:, 0], format="%Y%m%d", errors="coerce")
         dt = dt.dropna()
         if len(dt) > 0:
@@ -75,7 +75,7 @@ elif cv_file:
 
 # 期間選択
 start_date, end_date = st.date_input(
-    "集計期間を選択",
+    "集計期間を選択👇",
     value=(default_start, default_end)
 )
 
@@ -91,7 +91,7 @@ st.caption(f"📅 集計日数：{days}日（{start_date} ～ {end_date}）")
 cv_result_base = None
 
 if cv_file:
-    st.subheader("✅ 申込データ集計結果（CV）")
+    st.subheader("✅ 申込データ集計結果")
 
     test_df = pd.read_excel(cv_file, header=0, engine="openpyxl")
     test_df["日付"] = pd.to_datetime(test_df.iloc[:, 0], format="%Y%m%d", errors="coerce")
@@ -120,7 +120,7 @@ if cv_file:
         else:
             continue
 
-        # Display完全削除（保険）
+        # Display削除
         if str(category).lower() == "display" or "display" in str(category).lower():
             continue
 
@@ -152,14 +152,14 @@ cost_summary = {
     "LS_Googleその他": 0.0,
     "LS_Yahoo単体": 0.0,
     "LS_Yahoo単体以外": 0.0,
-    "LS_Yahoo単体（PSD）": 0.0,  # コスト側に専用列が無い場合はYahoo単体に寄せる
+    "LS_Yahoo単体（PSD）": 0.0,  # Yahoo単体に寄せる
     "LS_MS単体": 0.0,
     "LS_MS単体以外": 0.0,
     "LS_Google単体→2025年11月よりMSその他": 0.0  # コスト側で扱いがなければ後で寄せる
 }
 
 if cost_file:
-    st.subheader("✅ 配信費集計結果（期間合計）")
+    st.subheader("✅ 配信費集計結果")
 
     xls = pd.ExcelFile(cost_file)
     # Display除外：Listing/affiliate のみ
@@ -205,8 +205,8 @@ if cost_file:
                 if idx < len(filtered_df.columns):
                     cost_summary[k] += pd.to_numeric(filtered_df.iloc[:, idx], errors="coerce").fillna(0).sum()
 
-    # PSDや「MSその他」ラベルへの寄せ（現場ルールがある場合はここを調整）
-    # - PSDがコスト側で分かれない場合：Yahoo単体に寄せる
+    # YahooPSD・MSその他　ラベルへの寄せ
+    # - YahooPSD：Yahoo単体に寄せる
     cost_summary["LS_Yahoo単体（PSD）"] = cost_summary["LS_Yahoo単体"]
 
     # - 「LS_Google単体→2025年11月よりMSその他」がコスト側で独立していない場合の暫定：
