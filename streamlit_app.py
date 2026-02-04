@@ -7,6 +7,12 @@ from datetime import date
 st.set_page_config(layout="wide")
 st.title("📊 期間中CV・配信費集計ツール（Affiliate + Listing）")
 
+# ====== 文字列正規化（改行/スペース除去） ======
+def _norm_text(x) -> str:
+    if x is None:
+        return ""
+    return str(x).replace("\r", "").replace("\n", "").strip()
+
 # AFマスター読み込み
 af_path = "AFマスター.xlsx"
 af_df = pd.read_excel(af_path, usecols="B:D", header=1, engine="openpyxl")
@@ -127,7 +133,7 @@ if cv_file:
         .sum()
     )
 
-    # CV日割り：7固定 → 選択日数に変更
+    # CV日割り：選択日数
     cv_result_base["CV日割り"] = (cv_result_base["CV合計"] / days).round(2)
 
     # 表示用に順序
@@ -322,10 +328,54 @@ def _make_summary_rows(df):
 
     return pd.DataFrame(rows)
 
+# ====== ★媒体行のE列へ費用を入れる（ご要望①〜⑨） ======
+def _apply_cost_to_media_rows(base_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    base_df: cv_result_baseをベースにした通常行（分類/媒体/CV合計/CV日割り/合計費用）
+    指定された媒体（B列）の行にのみ、E列（合計費用）へ期間合計費用を入れる
+    """
+    if base_df is None or len(base_df) == 0:
+        return base_df
+    if not cost_file:
+        return base_df
+
+    # 指定媒体ごとの費用（期間合計）
+    # ⑧は「LS_Yahoo単体 + LS_Yahoo単体（PSD）」の合算
+    media_cost_map = {
+        "Affiliate": cost_summary.get("Affiliate_total", 0.0),  # ①
+        "LS_Googleその他": cost_summary.get("LS_Googleその他", 0.0),  # ②
+        "LS_Google単体": cost_summary.get("LS_Google単体", 0.0),  # ③
+        "LS_Google単体→2025年11月よりMSその他": cost_summary.get("LS_Google単体→2025年11月よりMSその他", 0.0),  # ④
+        "LS_Google単体以外": cost_summary.get("LS_Google単体以外", 0.0),  # ⑤
+        "LS_MS単体": cost_summary.get("LS_MS単体", 0.0),  # ⑥
+        "LS_MS単体以外": cost_summary.get("LS_MS単体以外", 0.0),  # ⑦
+        "LS_Yahoo単体": cost_summary.get("LS_Yahoo単体", 0.0),  # ⑧
+        "LS_Yahoo単体以外": cost_summary.get("LS_Yahoo単体以外", 0.0),  # ⑨
+    }
+
+    # 媒体名を正規化して照合
+    base_df = base_df.copy()
+    base_df["媒体_norm"] = base_df["媒体"].apply(_norm_text)
+
+    def _pick_cost(media_norm: str):
+        if media_norm in media_cost_map:
+            return round(float(media_cost_map[media_norm]), 0)
+        return ""  # 指定外は空欄
+
+    base_df["合計費用"] = base_df["媒体_norm"].apply(_pick_cost)
+
+    # 作業列を削除
+    base_df.drop(columns=["媒体_norm"], inplace=True)
+    return base_df
+
 # final_df作成（E列追加＆合計行追加）
 if cv_result_base is not None:
     base = cv_result_base.copy()
-    base["合計費用"] = ""  # 通常行は空
+
+    # 通常行のE列（合計費用）をいったん空にしてから、指定媒体のみ値を入れる
+    base["合計費用"] = ""
+    base = _apply_cost_to_media_rows(base)  # ★ここで①〜⑨反映
+
     summary_rows = _make_summary_rows(base)
 
     final_df = pd.concat([base, summary_rows], ignore_index=True)
@@ -340,7 +390,7 @@ with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
     if final_df is not None:
         final_df.to_excel(writer, index=False, sheet_name="申込件数")
 
-        # 参考情報（期間）を上部に書きたい場合はここでセルに書き込めます
+        # 参考情報（期間）
         ws = writer.sheets["申込件数"]
         ws.write(0, 6, "集計期間")  # G1
         ws.write(0, 7, f"{start_date} ～ {end_date}")  # H1
@@ -349,7 +399,7 @@ with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
 
 # ダウンロードボタン
 st.download_button(
-    "📥 集計Excelをダウンロード（申込件数シートのみ）",
+    "📥 集計Excelをダウンロード",
     data=output.getvalue(),
     file_name=f"集計結果_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
