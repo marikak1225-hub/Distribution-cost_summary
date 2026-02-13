@@ -443,7 +443,7 @@ if cost_file:
         xls = pd.ExcelFile(cost_file)
         daily_cost_df, daily_cost_df_for_excel = _build_daily_cost_report_all_range(xls)
 
-        st.subheader("🗓️ コストレポート（日別・Forecast/実績）— 読み込んだ全期間で表示/出力")
+        st.subheader("🗓️ コストレポート（日別・Forecast/実績）— AffのAFCV=*0.9、DisはnonIFRS除外")
         if daily_cost_df is not None and not daily_cost_df.empty:
             st.dataframe(daily_cost_df, use_container_width=True)
         else:
@@ -633,16 +633,16 @@ if (final_df is not None and len(final_df) > 0) or (daily_cost_df_for_excel is n
             # データ書き込み（全期間）
             order_cols = [
                 "Forecast_AFCV_Listing",
-                "Forecast_AFCV_Display(nonIFRS除外)",
+                "Forecast_AFCV_Display",
                 "Forecast_AFCV_Affiliate",
                 "Forecast_配信費_Listing",
-                "Forecast_配信費_Display(nonIFRS除外)",
+                "Forecast_配信費_Display",
                 "Forecast_配信費_Affiliate",
                 "実績_AFCV_Listing",
-                "実績_AFCV_Display(nonIFRS除外)",
-                "実績_AFCV_Affiliate(×0.9)",
+                "実績_AFCV_Display",
+                "実績_AFCV_Affiliate",
                 "実績_配信費_Listing",
-                "実績_配信費_Display(nonIFRS除外)",
+                "実績_配信費_Display",
                 "実績_配信費_Affiliate",
             ]
             dfw = daily_cost_df_for_excel.copy()
