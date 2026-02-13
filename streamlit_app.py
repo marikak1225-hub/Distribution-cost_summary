@@ -150,7 +150,7 @@ elif cv_file:
 
 # 期間選択（※この期間は「出力用テーブル」だけに適用します）
 start_date, end_date = st.date_input(
-    "集計期間を選択👇（※出力用テーブルのみ期間反映。日別コストは全期間で出力）",
+    "集計期間を選択👇（※領域別コンディション用集計のみ期間反映）",
     value=(default_start, default_end)
 )
 
@@ -217,9 +217,7 @@ if cv_file:
         # 表示順
         cv_result_base = cv_result_base.sort_values(["分類", "媒体"]).reset_index(drop=True)
 
-# ---------------------------
 # コスト集計（Listing + Affiliate）・・・内部計算（期間適用：出力用テーブル用）
-# ---------------------------
 cost_summary = {
     "Affiliate_total": 0.0,
     "Listing_total": 0.0,
@@ -277,10 +275,7 @@ if cost_file:
     cost_summary["LS_Yahoo単体"] += cost_summary.get("LS_Yahoo単体（PSD）", 0.0)
     cost_summary["LS_Yahoo単体（PSD）"] = 0.0
 
-# ---------------------------
-# 追加機能：コストレポートから日別 Forecast / 実績（AFCV・配信費）抽出
-# ここは「読み込めた全期間」を対象に集計・表示・エクスポートします
-# ---------------------------
+# コストレポートから日別 Forecast / 実績（AFCV・配信費）抽出
 daily_cost_df = None  # フラット列（Streamlit表示用）
 daily_cost_df_for_excel = None  # Excel 出力用
 
@@ -310,7 +305,7 @@ def _build_daily_cost_report_all_range(xls: pd.ExcelFile):
         "Display":   {"date": 1, "actual_afcv": 18, "actual_cost": 17, "fc_afcv": 6, "fc_cost": 3},
     }
 
-    # まず全シートから日付の min/max を特定
+    # 全シートから日付の min/max を特定
     all_dates_collect = []
     def _read_sheet_robust(sheet_name):
         try:
@@ -443,7 +438,7 @@ if cost_file:
         xls = pd.ExcelFile(cost_file)
         daily_cost_df, daily_cost_df_for_excel = _build_daily_cost_report_all_range(xls)
 
-        st.subheader("🗓️ コストレポート（日別・Forecast/実績）— AffのAFCV=*0.9、DisはnonIFRS除外")
+        st.subheader("🗓️ コストレポート（日別・Forecast/実績）※AffのAFCV=*0.9、DisはnonIFRS除外")
         if daily_cost_df is not None and not daily_cost_df.empty:
             st.dataframe(daily_cost_df, use_container_width=True)
         else:
@@ -451,9 +446,7 @@ if cost_file:
     except Exception as e:
         st.error(f"日別集計の処理でエラーが発生しました: {e}")
 
-# ---------------------------
 # 合計（CV＆費用）→ 出力用テーブル（期間適用）
-# ---------------------------
 final_df = None
 
 def _sum_cv(df, category_filter=None, media_in=None):
@@ -583,9 +576,7 @@ if final_df is not None and len(final_df) > 0:
     show_cols = ["分類", "媒体", "CV合計", "CV日割り", "合計費用"]
     st.dataframe(final_df[show_cols], use_container_width=True)
 
-# ---------------------------
 # Excel出力（申込件数=期間適用 / コストレポート日別=全期間）
-# ---------------------------
 if (final_df is not None and len(final_df) > 0) or (daily_cost_df_for_excel is not None and not daily_cost_df_for_excel.empty):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
