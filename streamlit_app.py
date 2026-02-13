@@ -148,9 +148,9 @@ elif cv_file:
     if mm:
         default_start, default_end = mm
 
-# 期間選択
+# 期間選択（※この期間は「出力用テーブル」だけに適用します）
 start_date, end_date = st.date_input(
-    "集計期間を選択👇",
+    "集計期間を選択👇（※出力用テーブルのみ期間反映。日別コストは全期間で出力）",
     value=(default_start, default_end)
 )
 
@@ -160,16 +160,15 @@ if start_date > end_date:
 
 # 日数（inclusive）
 days = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days + 1
-st.caption(f"📅 集計日数：{days}日（{start_date} ～ {end_date}）")
+st.caption(f"📅 出力用テーブルの集計日数：{days}日（{start_date} ～ {end_date}）")
+st.caption("📝 コストレポート日別は、読み込めた全期間でエクスポートします。")
 
 # ---------------------------
-# CV集計（Affiliate + Listing）・・・画面表示は削除、内部計算は維持
+# CV集計（Affiliate + Listing）・・・画面表示は出さず、内部計算のみ（期間適用）
 # ---------------------------
 cv_result_base = None
 
 if cv_file:
-    # （表示削除）st.subheader("✅ 申込データ集計結果")
-
     test_df = pd.read_excel(cv_file, header=0, engine="openpyxl")
     test_df["日付"] = pd.to_datetime(test_df.iloc[:, 0], format="%Y%m%d", errors="coerce")
 
@@ -219,7 +218,7 @@ if cv_file:
         cv_result_base = cv_result_base.sort_values(["分類", "媒体"]).reset_index(drop=True)
 
 # ---------------------------
-# コスト集計（Listing + Affiliate）・・・画面表示は削除、内部計算は維持
+# コスト集計（Listing + Affiliate）・・・内部計算（期間適用：出力用テーブル用）
 # ---------------------------
 cost_summary = {
     "Affiliate_total": 0.0,
@@ -238,7 +237,6 @@ cost_summary = {
 }
 
 if cost_file:
-    # （表示削除）st.subheader("✅ 配信費集計結果（合計）")
     xls = pd.ExcelFile(cost_file)
     target_sheets = [s for s in xls.sheet_names if ("listing" in s.lower()) or ("affiliate" in s.lower())]
 
@@ -281,12 +279,16 @@ if cost_file:
 
 # ---------------------------
 # 追加機能：コストレポートから日別 Forecast / 実績（AFCV・配信費）抽出
+# ここは「読み込めた全期間」を対象に集計・表示・エクスポートします
 # ---------------------------
 daily_cost_df = None  # フラット列（Streamlit表示用）
 daily_cost_df_for_excel = None  # Excel 出力用
 
-def _build_daily_cost_report(xls: pd.ExcelFile, start_date, end_date):
-    """コストレポートから日別の Forecast/実績（AFCV/配信費）を Listing/Display/Affiliate別に集計（堅牢版）"""
+def _build_daily_cost_report_all_range(xls: pd.ExcelFile):
+    """
+    コストレポートから日別の Forecast/実績（AFCV/配信費）を Listing/Display/Affiliate別に集計（堅牢版）
+    ★全期間（対象シート全体の最小～最大日付）で集計する★
+    """
     # 対象シート
     sheets = []
     for s in xls.sheet_names:
@@ -301,8 +303,48 @@ def _build_daily_cost_report(xls: pd.ExcelFile, start_date, end_date):
     if not sheets:
         return None, None
 
-    # 日付レンジ
-    all_days = pd.date_range(pd.to_datetime(start_date), pd.to_datetime(end_date), freq="D")
+    # 列位置（0始まり）
+    col_idx = {
+        "Affiliate": {"date": 0, "actual_afcv": 3, "actual_cost": 20, "fc_afcv": 2, "fc_cost": 19},
+        "Listing":   {"date": 1, "actual_afcv": 18, "actual_cost": 17, "fc_afcv": 6, "fc_cost": 3},
+        "Display":   {"date": 1, "actual_afcv": 18, "actual_cost": 17, "fc_afcv": 6, "fc_cost": 3},
+    }
+
+    # まず全シートから日付の min/max を特定
+    all_dates_collect = []
+    def _read_sheet_robust(sheet_name):
+        try:
+            return pd.read_excel(xls, sheet_name=sheet_name, engine="openpyxl"), False
+        except Exception:
+            pass
+        try:
+            return pd.read_excel(xls, sheet_name=sheet_name, engine="openpyxl", header=None), True
+        except Exception:
+            return None, False
+
+    for sheet_name, typ in sheets:
+        df0, used_header_none = _read_sheet_robust(sheet_name)
+        if df0 is None or df0.empty:
+            continue
+        idxs = col_idx[typ]
+        if idxs["date"] >= len(df0.columns):
+            if not used_header_none:
+                df1, used_header_none2 = _read_sheet_robust(sheet_name)
+                if df1 is None or idxs["date"] >= len(df1.columns):
+                    continue
+                df0 = df1
+            else:
+                continue
+        s_date0 = _coerce_date_series(df0.iloc[:, idxs["date"]]).dropna()
+        if not s_date0.empty:
+            all_dates_collect.extend(list(pd.to_datetime(s_date0).dt.floor("D")))
+
+    if not all_dates_collect:
+        return None, None
+
+    global_min = min(all_dates_collect)
+    global_max = max(all_dates_collect)
+    all_days = pd.date_range(global_min, global_max, freq="D")
 
     def zero_series():
         return pd.Series(0.0, index=all_days)
@@ -322,24 +364,7 @@ def _build_daily_cost_report(xls: pd.ExcelFile, start_date, end_date):
         ("実績", "配信費", "Affiliate"): zero_series(),
     }
 
-    # 列位置（0始まり）
-    col_idx = {
-        "Affiliate": {"date": 0, "actual_afcv": 3, "actual_cost": 20, "fc_afcv": 2, "fc_cost": 19},
-        "Listing":   {"date": 1, "actual_afcv": 18, "actual_cost": 17, "fc_afcv": 6, "fc_cost": 3},
-        "Display":   {"date": 1, "actual_afcv": 18, "actual_cost": 17, "fc_afcv": 6, "fc_cost": 3},
-    }
-
-    def _read_sheet_robust(sheet_name):
-        """header=0 で失敗/ズレる場合は header=None を試す"""
-        try:
-            return pd.read_excel(xls, sheet_name=sheet_name, engine="openpyxl"), False
-        except Exception:
-            pass
-        try:
-            return pd.read_excel(xls, sheet_name=sheet_name, engine="openpyxl", header=None), True
-        except Exception:
-            return None, False
-
+    # 本集計（★期間フィルタはかけない★）
     for sheet_name, typ in sheets:
         df, used_header_none = _read_sheet_robust(sheet_name)
         if df is None or df.empty:
@@ -355,18 +380,10 @@ def _build_daily_cost_report(xls: pd.ExcelFile, start_date, end_date):
             else:
                 continue
 
-        # 日付変換（堅牢）
         s_date = _coerce_date_series(df.iloc[:, idxs["date"]])
-        # 期間フィルタ
-        mask = (s_date >= pd.to_datetime(start_date)) & (s_date <= pd.to_datetime(end_date))
-        df = df[mask].copy()
-        s_date = s_date[mask]
-
-        # 全NaT or 空ならスキップ
-        if df.empty or s_date.dropna().empty:
+        if s_date.dropna().empty:
             continue
 
-        # 数値列取り出し（存在しなければ 0）
         def safe_num(col_i):
             if col_i < len(df.columns):
                 return pd.to_numeric(df.iloc[:, col_i], errors="coerce").fillna(0.0)
@@ -380,19 +397,16 @@ def _build_daily_cost_report(xls: pd.ExcelFile, start_date, end_date):
         if typ == "Affiliate":
             s_ac_afcv = s_ac_afcv * 0.9  # 実績AFCVは0.9掛け
 
-        # groupby
         g = pd.DataFrame({
             "_date": pd.to_datetime(s_date).dt.floor("D"),
             "_fc_afcv": s_fc_afcv.values,
             "_fc_cost": s_fc_cost.values,
             "_ac_afcv": s_ac_afcv.values,
             "_ac_cost": s_ac_cost.values,
-        }).groupby("_date", as_index=True).sum()
-
-        # 全日付へ
+        })
+        g = g.dropna(subset=["_date"]).groupby("_date", as_index=True).sum()
         g = g.reindex(all_days, fill_value=0.0)
 
-        # 積み上げ
         series_map[("Forecast", "AFCV", typ)] += g["_fc_afcv"]
         series_map[("Forecast", "配信費", typ)] += g["_fc_cost"]
         series_map[("実績", "AFCV", typ)] += g["_ac_afcv"]
@@ -417,28 +431,28 @@ def _build_daily_cost_report(xls: pd.ExcelFile, start_date, end_date):
     for key in order:
         data_dict[f"{key[0]}_{key[1]}_{key[2]}"] = series_map[key].astype(float)
 
-    idx = series_map[("Forecast", "AFCV", "Listing")].index
-    df_flat = pd.DataFrame(data_dict, index=idx).reset_index().rename(columns={"index": "日付"})
+    df_flat = pd.DataFrame(data_dict, index=series_map[("Forecast", "AFCV", "Listing")].index).reset_index()
+    df_flat.rename(columns={"index": "日付"}, inplace=True)
     df_flat["日付"] = pd.to_datetime(df_flat["日付"]).dt.strftime("%Y/%m/%d")
 
     return df_flat, df_flat.copy()
 
-# 実行：日別集計
+# 実行：日別集計（★全期間で集計・表示★）
 if cost_file:
     try:
         xls = pd.ExcelFile(cost_file)
-        daily_cost_df, daily_cost_df_for_excel = _build_daily_cost_report(xls, start_date, end_date)
+        daily_cost_df, daily_cost_df_for_excel = _build_daily_cost_report_all_range(xls)
 
-        st.subheader("🗓️ コストレポート（日別・Forecast/実績）")
+        st.subheader("🗓️ コストレポート（日別・Forecast/実績）— 読み込んだ全期間で表示/出力")
         if daily_cost_df is not None and not daily_cost_df.empty:
             st.dataframe(daily_cost_df, use_container_width=True)
         else:
-            st.info("対象シート（Listing/Display/Affiliate かつ Display は nonIFRS 除外）が見つからない、または期間内データがありません。")
+            st.info("対象シート（Listing/Display/Affiliate かつ Display は nonIFRS 除外）が見つからない、または日付列を解釈できませんでした。")
     except Exception as e:
         st.error(f"日別集計の処理でエラーが発生しました: {e}")
 
 # ---------------------------
-# 合計（CV＆費用）→ 既存 final_df の生成
+# 合計（CV＆費用）→ 出力用テーブル（期間適用）
 # ---------------------------
 final_df = None
 
@@ -477,7 +491,7 @@ def _make_summary_rows(df):
     cv_brand = _sum_cv(df, category_filter="Listing", media_in=brand_medias)
     cv_other = _sum_cv(df, category_filter="Listing", media_in=other_medias)
 
-    # 費用合計
+    # 費用合計（期間反映）
     cost_all = cost_summary.get("Affiliate_total", 0.0) + cost_summary.get("Listing_total", 0.0)
     cost_sem = cost_summary.get("Listing_total", 0.0)
 
@@ -555,7 +569,7 @@ def _apply_cost_to_media_rows(base_df: pd.DataFrame) -> pd.DataFrame:
     base_df.drop(columns=["媒体_norm"], inplace=True)
     return base_df
 
-# final_df作成
+# final_df作成（期間適用）＋ 画面表示
 if cv_result_base is not None and len(cv_result_base) > 0:
     base = cv_result_base.copy()
     base["媒体"] = base["媒体"].apply(_alias_media)
@@ -564,20 +578,18 @@ if cv_result_base is not None and len(cv_result_base) > 0:
     summary_rows = _make_summary_rows(base)
     final_df = pd.concat([base, summary_rows], ignore_index=True)
 
-# ====== ここを復活：出力用テーブルの画面表示 ======
 if final_df is not None and len(final_df) > 0:
-    st.subheader("📤 出力用テーブル（分類／媒体／CV合計／CV日割り／合計費用）")
-    # 念のため列順を固定
+    st.subheader("📤 出力用テーブル（分類／媒体／CV合計／CV日割り／合計費用）— 期間適用")
     show_cols = ["分類", "媒体", "CV合計", "CV日割り", "合計費用"]
     st.dataframe(final_df[show_cols], use_container_width=True)
 
 # ---------------------------
-# Excel出力（申込件数 + コストレポート日別）
+# Excel出力（申込件数=期間適用 / コストレポート日別=全期間）
 # ---------------------------
 if (final_df is not None and len(final_df) > 0) or (daily_cost_df_for_excel is not None and not daily_cost_df_for_excel.empty):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        # 1) 申込件数シート（既存）
+        # 1) 申込件数シート（期間適用）
         if final_df is not None and len(final_df) > 0:
             final_df.to_excel(writer, index=False, sheet_name="申込件数")
             ws = writer.sheets["申込件数"]
@@ -586,7 +598,7 @@ if (final_df is not None and len(final_df) > 0) or (daily_cost_df_for_excel is n
             ws.write(1, 6, "集計日数")  # G2
             ws.write(1, 7, days)  # H2
 
-        # 2) コストレポート日別シート（新規）
+        # 2) コストレポート日別シート（全期間）
         if daily_cost_df_for_excel is not None and not daily_cost_df_for_excel.empty:
             workbook = writer.book
             ws2 = workbook.add_worksheet("コストレポート日別")
@@ -618,7 +630,7 @@ if (final_df is not None and len(final_df) > 0) or (daily_cost_df_for_excel is n
             ws2.set_column(0, 0, 12)   # 日付
             ws2.set_column(1, 12, 14)  # 値
 
-            # データ書き込み
+            # データ書き込み（全期間）
             order_cols = [
                 "Forecast_AFCV_Listing",
                 "Forecast_AFCV_Display",
@@ -643,14 +655,14 @@ if (final_df is not None and len(final_df) > 0) or (daily_cost_df_for_excel is n
                     val = float(row.get(col, 0.0))
                     ws2.write_number(r, c, val, fmt_num)
 
-            # 期間情報
-            ws2.write(0, 14, "集計期間")
-            ws2.write(0, 15, f"{start_date} ～ {end_date}")
+            # 参考情報（ここは全期間なので期間表記は任意）
+            ws2.write(0, 14, "備考")
+            ws2.write(0, 15, "全期間集計（読み込み可能な最小～最大日付）")
 
     st.download_button(
         "📥 集計結果をダウンロード",
         data=output.getvalue(),
-        file_name=f"集計結果_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
+        file_name=f"集計結果_{date.today().strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 else:
