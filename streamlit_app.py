@@ -633,16 +633,16 @@ if (final_df is not None and len(final_df) > 0) or (daily_cost_df_for_excel is n
             # データ書き込み（全期間）
             order_cols = [
                 "Forecast_AFCV_Listing",
-                "Forecast_AFCV_Display",
+                "Forecast_AFCV_Display(nonIFRS除外)",
                 "Forecast_AFCV_Affiliate",
                 "Forecast_配信費_Listing",
-                "Forecast_配信費_Display",
+                "Forecast_配信費_Display(nonIFRS除外)",
                 "Forecast_配信費_Affiliate",
                 "実績_AFCV_Listing",
-                "実績_AFCV_Display",
-                "実績_AFCV_Affiliate",
+                "実績_AFCV_Display(nonIFRS除外)",
+                "実績_AFCV_Affiliate(×0.9)",
                 "実績_配信費_Listing",
-                "実績_配信費_Display",
+                "実績_配信費_Display(nonIFRS除外)",
                 "実績_配信費_Affiliate",
             ]
             dfw = daily_cost_df_for_excel.copy()
