@@ -148,7 +148,7 @@ elif cv_file:
     if mm:
         default_start, default_end = mm
 
-# 期間選択（※この期間は「出力用テーブル」だけに適用します）
+# 期間選択（※この期間は領域別コンディション集計だけに適用します）
 start_date, end_date = st.date_input(
     "集計期間を選択👇（※領域別コンディション用集計のみ期間反映）",
     value=(default_start, default_end)
@@ -160,12 +160,10 @@ if start_date > end_date:
 
 # 日数（inclusive）
 days = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days + 1
-st.caption(f"📅 出力用テーブルの集計日数：{days}日（{start_date} ～ {end_date}）")
+st.caption(f"📅 領域別コンディション集計の集計日数：{days}日（{start_date} ～ {end_date}）")
 st.caption("📝 コストレポート日別は、読み込めた全期間でエクスポートします。")
 
-# ---------------------------
 # CV集計（Affiliate + Listing）・・・画面表示は出さず、内部計算のみ（期間適用）
-# ---------------------------
 cv_result_base = None
 
 if cv_file:
@@ -217,7 +215,7 @@ if cv_file:
         # 表示順
         cv_result_base = cv_result_base.sort_values(["分類", "媒体"]).reset_index(drop=True)
 
-# コスト集計（Listing + Affiliate）・・・内部計算（期間適用：出力用テーブル用）
+# コスト集計（Listing + Affiliate）・・・内部計算（期間適用：領域別コンディション集計用）
 cost_summary = {
     "Affiliate_total": 0.0,
     "Listing_total": 0.0,
@@ -446,7 +444,7 @@ if cost_file:
     except Exception as e:
         st.error(f"日別集計の処理でエラーが発生しました: {e}")
 
-# 合計（CV＆費用）→ 出力用テーブル（期間適用）
+# 合計（CV＆費用）→ 領域別コンディション集計用テーブル（期間適用）
 final_df = None
 
 def _sum_cv(df, category_filter=None, media_in=None):
@@ -572,7 +570,7 @@ if cv_result_base is not None and len(cv_result_base) > 0:
     final_df = pd.concat([base, summary_rows], ignore_index=True)
 
 if final_df is not None and len(final_df) > 0:
-    st.subheader("📤 出力用テーブル（分類／媒体／CV合計／CV日割り／合計費用）— 期間適用")
+    st.subheader("📤 領域別コンディション集計用テーブル（分類／媒体／CV合計／CV日割り／合計費用）— 期間適用")
     show_cols = ["分類", "媒体", "CV合計", "CV日割り", "合計費用"]
     st.dataframe(final_df[show_cols], use_container_width=True)
 
