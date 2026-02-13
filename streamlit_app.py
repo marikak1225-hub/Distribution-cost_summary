@@ -659,11 +659,13 @@ if (final_df is not None and len(final_df) > 0) or (daily_cost_df_for_excel is n
             ws2.write(0, 14, "備考")
             ws2.write(0, 15, "全期間集計（読み込み可能な最小～最大日付）")
 
-    st.download_button(
-        "📥 集計結果をダウンロード",
-        data=output.getvalue(),
-        file_name=f"集計結果_{date.today().strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    
+st.download_button(
+    "📥 集計結果をダウンロード",
+    data=output.getvalue(),
+    file_name=f"集計結果_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+
 else:
     st.info("📌 集計が完了するとダウンロードボタンが表示されます。")
