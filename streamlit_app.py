@@ -7,7 +7,7 @@ from pandas.api.types import is_datetime64_any_dtype as is_dt
 
 # ページ設定
 st.set_page_config(layout="wide")
-st.title("📊 期間中CV・配信費集計ツール（Affiliate + Listing + Display）")
+st.title("📊 期間中CV・配信費集計")
 
 # 文字列正規化（改行/スペース除去）
 def _norm_text(x) -> str:
