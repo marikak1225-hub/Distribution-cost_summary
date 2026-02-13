@@ -168,7 +168,7 @@ st.caption(f"📅 集計日数：{days}日（{start_date} ～ {end_date}）")
 cv_result_base = None
 
 if cv_file:
-    # st.subheader("✅ 申込データ集計結果")  # 表示削除
+    # （表示削除）st.subheader("✅ 申込データ集計結果")
 
     test_df = pd.read_excel(cv_file, header=0, engine="openpyxl")
     test_df["日付"] = pd.to_datetime(test_df.iloc[:, 0], format="%Y%m%d", errors="coerce")
@@ -238,7 +238,7 @@ cost_summary = {
 }
 
 if cost_file:
-    # st.subheader("✅ 配信費集計結果（合計）")  # 表示削除
+    # （表示削除）st.subheader("✅ 配信費集計結果（合計）")
     xls = pd.ExcelFile(cost_file)
     target_sheets = [s for s in xls.sheet_names if ("listing" in s.lower()) or ("affiliate" in s.lower())]
 
@@ -438,7 +438,7 @@ if cost_file:
         st.error(f"日別集計の処理でエラーが発生しました: {e}")
 
 # ---------------------------
-# 合計（CV＆費用）→ 既存 final_df の生成（画面表示は削除）
+# 合計（CV＆費用）→ 既存 final_df の生成
 # ---------------------------
 final_df = None
 
@@ -555,7 +555,7 @@ def _apply_cost_to_media_rows(base_df: pd.DataFrame) -> pd.DataFrame:
     base_df.drop(columns=["媒体_norm"], inplace=True)
     return base_df
 
-# final_df作成（画面表示は行わない）
+# final_df作成
 if cv_result_base is not None and len(cv_result_base) > 0:
     base = cv_result_base.copy()
     base["媒体"] = base["媒体"].apply(_alias_media)
@@ -563,6 +563,13 @@ if cv_result_base is not None and len(cv_result_base) > 0:
     base = _apply_cost_to_media_rows(base)
     summary_rows = _make_summary_rows(base)
     final_df = pd.concat([base, summary_rows], ignore_index=True)
+
+# ====== ここを復活：出力用テーブルの画面表示 ======
+if final_df is not None and len(final_df) > 0:
+    st.subheader("📤 出力用テーブル（分類／媒体／CV合計／CV日割り／合計費用）")
+    # 念のため列順を固定
+    show_cols = ["分類", "媒体", "CV合計", "CV日割り", "合計費用"]
+    st.dataframe(final_df[show_cols], use_container_width=True)
 
 # ---------------------------
 # Excel出力（申込件数 + コストレポート日別）
