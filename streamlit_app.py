@@ -55,7 +55,7 @@ def _coerce_date_series(s: pd.Series) -> pd.Series:
     s2 = pd.to_datetime(s2, errors="coerce")
     return s2
 
-# AFマスタ読込み
+# AFマスタ読込み（B:Dを使用、header=1 → 2行目が列名）
 af_path = "AFマスター.xlsx"
 af_df = pd.read_excel(af_path, usecols="B:D", header=1, engine="openpyxl")
 af_df.columns = ["AFコード", "媒体", "分類"]
@@ -166,8 +166,8 @@ st.caption("📝 コストレポート日別は、読み込めた全期間でエ
 # CV集計（Affiliate + Listing）・・・画面表示は出さず、内部計算のみ（期間適用）
 cv_result_base = None
 
-# NEW: 「日別」用のデータ格納変数を準備
-daily_allocation_df = None  # A:日付, B:割り振り(AFコード), C:領域(分類) — CV>0のみ
+# 「日別」シート用のデータ格納変数（A:日付, B:割り振り=媒体, C:領域=分類, D:合計値=CV）
+daily_allocation_df = None
 
 if cv_file:
     test_df = pd.read_excel(cv_file, header=0, engine="openpyxl")
@@ -218,31 +218,29 @@ if cv_file:
         # 表示順
         cv_result_base = cv_result_base.sort_values(["分類", "媒体"]).reset_index(drop=True)
 
-    
-# NEW: 「日別」シート用データを生成（期間適用 & CV>0のみ & AFマスタ一致）
-try:
-    # ロング化してCV>0を抽出（CVはD列「合計値」に出します）
-    cv_long = filtered.melt(id_vars=["日付"], var_name="コード", value_name="CV")
-    cv_long["CV"] = pd.to_numeric(cv_long["CV"], errors="coerce").fillna(0)
-    cv_long = cv_long[cv_long["CV"] > 0].copy()
+    # 「日別」シート用データを生成（期間適用 & CV>0のみ & AFマスタ一致）
+    try:
+        # ロング化してCV>0を抽出（CVはD列「合計値」に出します）
+        cv_long = filtered.melt(id_vars=["日付"], var_name="コード", value_name="CV")
+        cv_long["CV"] = pd.to_numeric(cv_long["CV"], errors="coerce").fillna(0)
+        cv_long = cv_long[cv_long["CV"] > 0].copy()
 
-    # AFマスタ（Display除外済み）と突合
-    #   AFマスタB列=AFコード, C列=媒体, D列=分類（既存のaf_dfマッピング）
-    af_min = af_df[["AFコード", "媒体", "分類"]].copy()
-    merged = cv_long.merge(af_min, left_on="コード", right_on="AFコード", how="left")
-    merged = merged.dropna(subset=["AFコード"])  # AFマスタに存在するコードのみ採用
+        # AFマスタ（Display除外済み）と突合
+        #   AFマスタB列=AFコード, C列=媒体, D列=分類（af_dfは["AFコード","媒体","分類"]）
+        af_min = af_df[["AFコード", "媒体", "分類"]].copy()
+        merged = cv_long.merge(af_min, left_on="コード", right_on="AFコード", how="left")
+        merged = merged.dropna(subset=["AFコード"])  # AFマスタに存在するコードのみ採用
 
-    # 出力列（A:日付, B:割り振り=媒体(C列), C:領域=分類(D列), D:合計値=CV）
-    daily_allocation_df = merged[["日付", "媒体", "分類", "CV"]].copy()
-    daily_allocation_df.rename(
-        columns={"媒体": "割り振り", "分類": "領域", "CV": "合計値"},
-        inplace=True
-    )
-    daily_allocation_df["日付"] = pd.to_datetime(daily_allocation_df["日付"]).dt.floor("D")
-    daily_allocation_df = daily_allocation_df.sort_values(["日付", "割り振り"]).reset_index(drop=True)
-except Exception as e:
-    st.warning(f"日別シート用データ生成でエラーが発生しました: {e}")
-
+        # 出力列（A:日付, B:割り振り=媒体(C列), C:領域=分類(D列), D:合計値=CV）
+        daily_allocation_df = merged[["日付", "媒体", "分類", "CV"]].copy()
+        daily_allocation_df.rename(
+            columns={"媒体": "割り振り", "分類": "領域", "CV": "合計値"},
+            inplace=True
+        )
+        daily_allocation_df["日付"] = pd.to_datetime(daily_allocation_df["日付"]).dt.floor("D")
+        daily_allocation_df = daily_allocation_df.sort_values(["日付", "割り振り"]).reset_index(drop=True)
+    except Exception as e:
+        st.warning(f"日別シート用データ生成でエラーが発生しました: {e}")
 
 # コスト集計（Listing + Affiliate）・・・内部計算（期間適用：領域別コンディション集計用）
 cost_summary = {
@@ -604,10 +602,11 @@ if final_df is not None and len(final_df) > 0:
     st.dataframe(final_df[show_cols], use_container_width=True)
 
 # Excel出力（申込件数=期間適用 / コストレポート日別=全期間 / 日別=期間適用）
-if (final_df is not None and len(final_df) > 0) or (daily_cost_df_for_excel is not None and not daily_cost_df_for_excel.empty) or (daily_allocation_df is not None and len(daily_allocation_df) > 0):
+if (final_df is not None and len(final_df) > 0) or \
+   (daily_cost_df_for_excel is not None and not daily_cost_df_for_excel.empty) or \
+   (daily_allocation_df is not None and len(daily_allocation_df) > 0):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        # 先にworkbook参照を確保
         workbook = writer.book
 
         # 1) 申込件数シート（期間適用）
@@ -619,24 +618,23 @@ if (final_df is not None and len(final_df) > 0) or (daily_cost_df_for_excel is n
             ws.write(1, 6, "集計日数")  # G2
             ws.write(1, 7, days)  # H2
 
-       
-# 2) 日別シート（期間適用 / CV>0 / AFマスタ一致のみ）
-if daily_allocation_df is not None and len(daily_allocation_df) > 0:
-    df_day = daily_allocation_df.copy()
+        # 2) 日別シート（期間適用 / CV>0 / AFマスタ一致のみ）
+        if daily_allocation_df is not None and len(daily_allocation_df) > 0:
+            df_day = daily_allocation_df.copy()
 
-    # 出力
-    df_day.to_excel(writer, index=False, sheet_name="日別")
-    ws_day = writer.sheets["日別"]
+            # 出力
+            df_day.to_excel(writer, index=False, sheet_name="日別")
+            ws_day = writer.sheets["日別"]
 
-    # 書式
-    fmt_date_day = workbook.add_format({"num_format": "yyyy/mm/dd", "align": "center"})
-    fmt_num_day  = workbook.add_format({"num_format": "#,##0", "align": "right"})
+            # 書式
+            fmt_date_day = workbook.add_format({"num_format": "yyyy/mm/dd", "align": "center"})
+            fmt_num_day  = workbook.add_format({"num_format": "#,##0", "align": "right"})
 
-    # 列幅 & 既定フォーマット
-    ws_day.set_column(0, 0, 12, fmt_date_day)  # A列：日付（yyyy/mm/dd）
-    ws_day.set_column(1, 1, 24)                # B列：割り振り（媒体名）
-    ws_day.set_column(2, 2, 16)                # C列：領域（分類）
-    ws_day.set_column(3, 3, 12, fmt_num_day)   # D列：合計値（#,##0）
+            # 列幅 & 既定フォーマット
+            ws_day.set_column(0, 0, 12, fmt_date_day)  # A列：日付（yyyy/mm/dd）
+            ws_day.set_column(1, 1, 24)                # B列：割り振り（媒体名）
+            ws_day.set_column(2, 2, 16)                # C列：領域（分類）
+            ws_day.set_column(3, 3, 12, fmt_num_day)   # D列：合計値（#,##0）
 
         # 3) コストレポート日別シート（全期間）
         if daily_cost_df_for_excel is not None and not daily_cost_df_for_excel.empty:
