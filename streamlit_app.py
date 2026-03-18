@@ -4,6 +4,7 @@ import numpy as np
 from io import BytesIO
 from datetime import date
 from pandas.api.types import is_datetime64_any_dtype as is_dt
+from collections import defaultdict
 
 # ページ設定
 st.set_page_config(layout="wide")
@@ -54,6 +55,15 @@ def _coerce_date_series(s: pd.Series) -> pd.Series:
     # 最終キャスト
     s2 = pd.to_datetime(s2, errors="coerce")
     return s2
+
+# Excel列記法 → 0始まりインデックス
+def _excel_col_to_idx(col: str) -> int:
+    col = _norm_text(col).upper()
+    idx = 0
+    for ch in col:
+        if "A" <= ch <= "Z":
+            idx = idx * 26 + (ord(ch) - ord("A") + 1)
+    return idx - 1  # 0-based
 
 # AFマスタ読込み（B:Dを使用、header=1 → 2行目が列名）
 af_path = "AFマスター.xlsx"
@@ -166,7 +176,7 @@ st.caption("📝 コストレポート日別は、読み込めた全期間でエ
 # CV集計（Affiliate + Listing）・・・画面表示は出さず、内部計算のみ（期間適用）
 cv_result_base = None
 
-# 「日別」シート用のデータ格納変数（A:日付, B:割り振り=媒体, C:領域=分類, D:合計値=CV）
+# 「日別」シート用のデータ格納変数（A:日付, B:割り振り=媒体, C:領域=分類, D:合計値=CV, E:目標）
 daily_allocation_df = None
 
 if cv_file:
@@ -238,6 +248,8 @@ if cv_file:
             inplace=True
         )
         daily_allocation_df["日付"] = pd.to_datetime(daily_allocation_df["日付"]).dt.floor("D")
+        # 媒体名の寄せ（例：LS_Yahoo単体（PSD）→LS_Yahoo単体）
+        daily_allocation_df["割り振り"] = daily_allocation_df["割り振り"].apply(_alias_media)
         daily_allocation_df = daily_allocation_df.sort_values(["日付", "割り振り"]).reset_index(drop=True)
     except Exception as e:
         st.warning(f"日別シート用データ生成でエラーが発生しました: {e}")
@@ -300,7 +312,7 @@ if cost_file:
     cost_summary["LS_Yahoo単体"] += cost_summary.get("LS_Yahoo単体（PSD）", 0.0)
     cost_summary["LS_Yahoo単体（PSD）"] = 0.0
 
-# コストレポートから日別 Forecast / 実績（AFCV・配信費）抽出
+# コストレポートから日別 Forecast / 実績（AFCV・配信費）抽出（全期間）
 daily_cost_df = None  # フラット列（Streamlit表示用）
 daily_cost_df_for_excel = None  # Excel 出力用
 
@@ -456,6 +468,108 @@ def _build_daily_cost_report_all_range(xls: pd.ExcelFile):
     df_flat["日付"] = pd.to_datetime(df_flat["日付"]).dt.strftime("%Y/%m/%d")
 
     return df_flat, df_flat.copy()
+
+# NEW: コストレポートから「目標」用、日別×割り振りの値を抽出
+def _build_daily_targets_from_cost(xls: pd.ExcelFile) -> pd.DataFrame:
+    """
+    「日別」シートの『目標』列に入れるため、
+    コストレポートの指定列から「日付（B列）一致」で値を集計し、日付×割り振りで返す。
+    - Listing: 指定の7媒体
+    - Display: 指定の4媒体（nonIFRSは除外）
+    """
+    # 対象列マッピング（Excel列→0始まりindexに変換して使用）
+    listing_target_cols = {
+        "LS_Google単体": "AQ",
+        "LS_Google単体以外": "CA",
+        "LS_Googleその他": "DK",
+        "LS_Yahoo単体": "EU",
+        "LS_Yahoo単体以外": "GE",
+        "LS_MS単体": "HO",
+        "LS_MS単体以外": "IY",
+    }
+    display_target_cols = {
+        "DS_Meta": "AQ",
+        "DS_Yahoo": "EU",
+        "DS_Google": "JA",
+        "DS_Criteo": "KK",
+    }
+    listing_idx_map = {k: _excel_col_to_idx(v) for k, v in listing_target_cols.items()}
+    display_idx_map = {k: _excel_col_to_idx(v) for k, v in display_target_cols.items()}
+
+    # 加算用（日付IndexのSeriesを媒体ごとに保持）
+    series_map = defaultdict(pd.Series)  # key: 割り振り, val: Series(index=datetime, dtype=float)
+
+    def _read_sheet_robust(sheet_name):
+        try:
+            return pd.read_excel(xls, sheet_name=sheet_name, engine="openpyxl"), False
+        except Exception:
+            pass
+        try:
+            return pd.read_excel(xls, sheet_name=sheet_name, engine="openpyxl", header=None), True
+        except Exception:
+            return None, False
+
+    for s in xls.sheet_names:
+        sl = s.lower()
+        sheet_type = None
+        if "listing" in sl:
+            sheet_type = "Listing"
+        elif "display" in sl and "nonifrs" not in sl:  # nonIFRSは除外（既存方針に合わせる）
+            sheet_type = "Display"
+        else:
+            continue
+
+        df, used_header_none = _read_sheet_robust(s)
+        if df is None or df.empty:
+            continue
+
+        # 日付はB列（index=1）
+        date_col = 1
+        if date_col >= len(df.columns):
+            # header=None 再読みで列不足を救済
+            if not used_header_none:
+                df2, used_header_none2 = _read_sheet_robust(s)
+                if df2 is None or date_col >= len(df2.columns):
+                    continue
+                df = df2
+            else:
+                continue
+
+        s_date = _coerce_date_series(df.iloc[:, date_col]).dropna()
+        if s_date.empty:
+            continue
+
+        # 取り出す列群
+        idx_map = listing_idx_map if sheet_type == "Listing" else display_idx_map
+
+        for label, col_idx in idx_map.items():
+            if col_idx >= len(df.columns):
+                continue
+            vals = pd.to_numeric(df.iloc[:, col_idx], errors="coerce").fillna(0.0)
+            g = pd.DataFrame({"_date": pd.to_datetime(s_date).dt.floor("D"), "_val": vals.values})
+            g = g.dropna(subset=["_date"]).groupby("_date", as_index=True)["_val"].sum()
+
+            if label in series_map and not series_map[label].empty:
+                # インデックスを揃えて加算
+                series_map[label] = series_map[label].add(g, fill_value=0.0)
+            else:
+                series_map[label] = g
+
+    # ロングにして返す
+    rows = []
+    for label, ser in series_map.items():
+        if ser is None or len(ser) == 0:
+            continue
+        for dt, val in ser.items():
+            rows.append({"日付": pd.to_datetime(dt).floor("D"), "割り振り": label, "目標": float(val)})
+
+    if not rows:
+        return pd.DataFrame(columns=["日付", "割り振り", "目標"])
+
+    out = pd.DataFrame(rows)
+    # 並び：日付→割り振り
+    out = out.sort_values(["日付", "割り振り"]).reset_index(drop=True)
+    return out
 
 # 実行：日別集計（★全期間で集計・表示★）
 if cost_file:
@@ -622,19 +736,45 @@ if (final_df is not None and len(final_df) > 0) or \
         if daily_allocation_df is not None and len(daily_allocation_df) > 0:
             df_day = daily_allocation_df.copy()
 
+            # --- NEW: 目標の突合（cost_fileがある時のみ） ---
+            if cost_file:
+                try:
+                    xls2 = pd.ExcelFile(cost_file)
+                    daily_targets = _build_daily_targets_from_cost(xls2)
+                    if not daily_targets.empty:
+                        # 期間内のみに限定
+                        mask_period = (daily_targets["日付"] >= pd.to_datetime(start_date)) & \
+                                      (daily_targets["日付"] <= pd.to_datetime(end_date))
+                        daily_targets = daily_targets.loc[mask_period].copy()
+                        # マージ（日付×割り振り）
+                        df_day = df_day.merge(
+                            daily_targets,
+                            on=["日付", "割り振り"],
+                            how="left"
+                        )
+                    else:
+                        df_day["目標"] = np.nan
+                except Exception as e:
+                    st.warning(f"『目標』値の取得でエラーが発生しました: {e}")
+                    df_day["目標"] = np.nan
+            else:
+                df_day["目標"] = np.nan
+
             # 出力
             df_day.to_excel(writer, index=False, sheet_name="日別")
             ws_day = writer.sheets["日別"]
 
             # 書式
             fmt_date_day = workbook.add_format({"num_format": "yyyy/mm/dd", "align": "center"})
-            fmt_num_day  = workbook.add_format({"num_format": "#,##0", "align": "right"})
+            fmt_num_int  = workbook.add_format({"num_format": "#,##0", "align": "right"})
+            fmt_num_f2   = workbook.add_format({"num_format": "#,##0.00", "align": "right"})
 
-            # 列幅 & 既定フォーマット
-            ws_day.set_column(0, 0, 12, fmt_date_day)  # A列：日付（yyyy/mm/dd）
-            ws_day.set_column(1, 1, 24)                # B列：割り振り（媒体名）
-            ws_day.set_column(2, 2, 16)                # C列：領域（分類）
-            ws_day.set_column(3, 3, 12, fmt_num_day)   # D列：合計値（#,##0）
+            # 列幅 & 既定フォーマット（A:日付 / B:割り振り / C:領域 / D:合計値 / E:目標）
+            ws_day.set_column(0, 0, 12, fmt_date_day)  # A:日付
+            ws_day.set_column(1, 1, 24)                # B:割り振り
+            ws_day.set_column(2, 2, 16)                # C:領域
+            ws_day.set_column(3, 3, 12, fmt_num_int)   # D:合計値（CVは整数想定）
+            ws_day.set_column(4, 4, 14, fmt_num_f2)    # E:目標（小数含む想定）
 
         # 3) コストレポート日別シート（全期間）
         if daily_cost_df_for_excel is not None and not daily_cost_df_for_excel.empty:
