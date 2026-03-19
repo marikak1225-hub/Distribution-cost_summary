@@ -469,13 +469,15 @@ def _build_daily_cost_report_all_range(xls: pd.ExcelFile):
 
     return df_flat, df_flat.copy()
 
-# NEW: コストレポートから「目標」用、日別×割り振りの値を抽出
+# FIX: コストレポートから「目標」用、日別×割り振りの値を抽出（長さ不一致を解消）
 def _build_daily_targets_from_cost(xls: pd.ExcelFile) -> pd.DataFrame:
     """
     「日別」シートの『目標』列に入れるため、
     コストレポートの指定列から「日付（B列）一致」で値を集計し、日付×割り振りで返す。
     - Listing: 指定の7媒体
     - Display: 指定の4媒体（nonIFRSは除外）
+    ※ 日付列と値列を同一のDataFrameから同時に抽出→dropna(subset=['_date'])→groupbyで合計
+       とすることで、array length mismatch を防止
     """
     # 対象列マッピング（Excel列→0始まりindexに変換して使用）
     listing_target_cols = {
@@ -514,7 +516,7 @@ def _build_daily_targets_from_cost(xls: pd.ExcelFile) -> pd.DataFrame:
         sheet_type = None
         if "listing" in sl:
             sheet_type = "Listing"
-        elif "display" in sl and "nonifrs" not in sl:  # nonIFRSは除外（既存方針に合わせる）
+        elif "display" in sl and "nonifrs" not in sl:
             sheet_type = "Display"
         else:
             continue
@@ -535,22 +537,30 @@ def _build_daily_targets_from_cost(xls: pd.ExcelFile) -> pd.DataFrame:
             else:
                 continue
 
-        s_date = _coerce_date_series(df.iloc[:, date_col]).dropna()
-        if s_date.empty:
-            continue
-
-        # 取り出す列群
         idx_map = listing_idx_map if sheet_type == "Listing" else display_idx_map
 
+        # 対象ラベルごとに列を取得して集計
         for label, col_idx in idx_map.items():
             if col_idx >= len(df.columns):
                 continue
-            vals = pd.to_numeric(df.iloc[:, col_idx], errors="coerce").fillna(0.0)
-            g = pd.DataFrame({"_date": pd.to_datetime(s_date).dt.floor("D"), "_val": vals.values})
-            g = g.dropna(subset=["_date"]).groupby("_date", as_index=True)["_val"].sum()
 
+            # 必ず同じDataFrameから「日付列と値列」を同時に取り出してから処理（長さ不一致対策）
+            tmp = pd.DataFrame({
+                "_date": _coerce_date_series(df.iloc[:, date_col]),
+                "_val": pd.to_numeric(df.iloc[:, col_idx], errors="coerce"),
+            })
+            # 日付がNaTの行だけ除外（値側のNaNは0扱いにしたいので後でfillna(0)）
+            tmp = tmp.dropna(subset=["_date"])
+            if tmp.empty:
+                continue
+
+            # 日付を日単位に丸め、値はNaNを0として合計
+            tmp["_date"] = pd.to_datetime(tmp["_date"]).dt.floor("D")
+            tmp["_val"] = tmp["_val"].fillna(0.0)
+            g = tmp.groupby("_date", as_index=True)["_val"].sum()
+
+            # 既存Seriesと加算
             if label in series_map and not series_map[label].empty:
-                # インデックスを揃えて加算
                 series_map[label] = series_map[label].add(g, fill_value=0.0)
             else:
                 series_map[label] = g
@@ -736,7 +746,7 @@ if (final_df is not None and len(final_df) > 0) or \
         if daily_allocation_df is not None and len(daily_allocation_df) > 0:
             df_day = daily_allocation_df.copy()
 
-            # --- NEW: 目標の突合（cost_fileがある時のみ） ---
+            # 目標の突合（cost_fileがある時のみ）
             if cost_file:
                 try:
                     xls2 = pd.ExcelFile(cost_file)
