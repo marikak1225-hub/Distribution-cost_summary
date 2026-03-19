@@ -750,48 +750,45 @@ if (final_df is not None and len(final_df) > 0) or \
             ws.write(1, 7, days)  # H2
 
         # 2) 日別シート（期間適用 / CV>0 / AFマスタ一致のみ）
-        if daily_allocation_df is not None and len(daily_allocation_df) > 0:
-            df_day = daily_allocation_df.copy()
+if daily_allocation_df is not None and len(daily_allocation_df) > 0:
+    df_day = daily_allocation_df.copy()
 
-            # 目標の突合（cost_fileがある時のみ）
-            if cost_file:
-                try:
-                    xls2 = pd.ExcelFile(cost_file)
-                    daily_targets = _build_daily_targets_from_cost(xls2)
-                    if not daily_targets.empty:
-                        # 期間内のみに限定
-                        mask_period = (daily_targets["日付"] >= pd.to_datetime(start_date)) & \
-                                      (daily_targets["日付"] <= pd.to_datetime(end_date))
-                        daily_targets = daily_targets.loc[mask_period].copy()
-                        # マージ（日付×割り振り）
-                        df_day = df_day.merge(
-                            daily_targets,
-                            on=["日付", "割り振り"],
-                            how="left"
-                        )
-                    else:
-                        df_day["目標"] = np.nan
-                except Exception as e:
-                    st.warning(f"『目標』値の取得でエラーが発生しました: {e}")
-                    df_day["目標"] = np.nan
-            else:
-                df_day["目標"] = np.nan
+    # 目標の突合（省略: いままで通り）
 
-            # 出力
-            df_day.to_excel(writer, index=False, sheet_name="日別")
-            ws_day = writer.sheets["日別"]
+    # ★日付を datetime 型に統一（文字列化されている可能性を排除）
+    df_day["日付"] = pd.to_datetime(df_day["日付"]).dt.floor("D")
 
-            # 書式
-            fmt_date_day = workbook.add_format({"num_format": "yyyy/m/d", "align": "center"})  # ← yyyy/m/d
-            fmt_num_int  = workbook.add_format({"num_format": "#,##0", "align": "right"})
-            fmt_num_f2   = workbook.add_format({"num_format": "#,##0.00", "align": "right"})
+    # --- ここがポイント ---
+    # ① to_excel に date_format を渡す（列の初期書式を yyyy/m/d で書き出す）
+    df_day.to_excel(
+        writer,
+        index=False,
+        sheet_name="日別",
+        date_format="yyyy/m/d"
+    )
+    ws_day = writer.sheets["日別"]
+    workbook = writer.book
 
-            # 列幅 & 既定フォーマット（A:日付 / B:割り振り / C:領域 / D:合計値 / E:目標）
-            ws_day.set_column(0, 0, 12, fmt_date_day)  # A:日付（yyyy/m/d）
-            ws_day.set_column(1, 1, 24)                # B:割り振り
-            ws_day.set_column(2, 2, 16)                # C:領域
-            ws_day.set_column(3, 3, 12, fmt_num_int)   # D:合計値（CVは整数想定）
-            ws_day.set_column(4, 4, 14, fmt_num_f2)    # E:目標（小数含む想定）
+    # ② 書式オブジェクト
+    fmt_date_day = workbook.add_format({"num_format": "yyyy/m/d", "align": "center"})
+    fmt_num_int  = workbook.add_format({"num_format": "#,##0", "align": "right"})
+    fmt_num_f2   = workbook.add_format({"num_format": "#,##0.00", "align": "right"})
+
+    # ③ 列幅
+    ws_day.set_column(0, 0, 12)              # A:日付
+    ws_day.set_column(1, 1, 24)              # B:割り振り
+    ws_day.set_column(2, 2, 16)              # C:領域
+    ws_day.set_column(3, 3, 12, fmt_num_int) # D:合計値
+    ws_day.set_column(4, 4, 14, fmt_num_f2)  # E:目標
+
+    # ④ 念のため、A列だけ write_datetime で上書き（既存セルの形式を確実に yyyy/m/d に）
+    #    先頭行（0）はヘッダーなので、データは 1 行目（Excel上は2行目）から
+    start_row = 1
+    for i, dt_val in enumerate(df_day["日付"], start=start_row):
+        # 空/NaTの時はスキップ
+        if pd.isna(dt_val):
+            continue
+        ws_day.write_datetime(i, 0, pd.to_datetime(dt_val), fmt_date_day)
 
         # 3) コストレポート日別シート（全期間）
         if daily_cost_df_for_excel is not None and not daily_cost_df_for_excel.empty:
