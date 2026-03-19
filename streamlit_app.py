@@ -185,8 +185,7 @@ if cv_file:
         daily_allocation_df["日付"] = pd.to_datetime(daily_allocation_df["日付"]).dt.floor("D")
         daily_allocation_df["割り振り"] = daily_allocation_df["割り振り"].apply(_alias_media)
 
-        # ★同じ日付×同じ割り振りで合算（領域は代表値を残す）
-        #   もし「日付×割り振り×領域」で合算したい場合は、keys を ["日付","割り振り","領域"] に戻してください。
+        # ★同じ日付×同じ割り振りで合算（領域は代表値 first）
         daily_allocation_df = (
             daily_allocation_df
             .groupby(["日付", "割り振り"], as_index=False, dropna=False)
@@ -235,7 +234,6 @@ if cost_file:
 # コストレポートから日別 Forecast/実績（全期間）
 daily_cost_df = None
 daily_cost_df_for_excel = None
-
 def _build_daily_cost_report_all_range(xls: pd.ExcelFile):
     sheets = []
     for s in xls.sheet_names:
@@ -536,8 +534,8 @@ if (final_df is not None and len(final_df) > 0) or \
             # 日付をdatetimeに統一
             df_day["日付"] = pd.to_datetime(df_day["日付"]).dt.floor("D")
 
-            # まず date_format を指定して書き込み
-            df_day.to_excel(writer, index=False, sheet_name="日別", date_format="yyyy/m/d")
+            # FIX: date_format引数は使わない（環境で未対応なためTypeErrorになる）
+            df_day.to_excel(writer, index=False, sheet_name="日別")  # ← ここからdate_formatを削除
             ws_day = writer.sheets["日別"]
 
             # 書式
@@ -552,10 +550,11 @@ if (final_df is not None and len(final_df) > 0) or \
             ws_day.set_column(3, 3, 12, fmt_num_int) # D:合計値
             ws_day.set_column(4, 4, 14, fmt_num_f2)  # E:目標
 
-            # 念のため、A列を datetime 書式で上書き（確実に yyyy/m/d へ）
+            # ★A列を datetime 書式で上書き（確実に yyyy/m/d へ）
             start_row = 1  # ヘッダー行を除く
             for i, dt_val in enumerate(df_day["日付"], start=start_row):
-                if pd.isna(dt_val): continue
+                if pd.isna(dt_val): 
+                    continue
                 ws_day.write_datetime(i, 0, pd.to_datetime(dt_val), fmt_date_day)
 
         # 3) コストレポート日別（全期間）※日付も yyyy/m/d に統一
@@ -563,7 +562,7 @@ if (final_df is not None and len(final_df) > 0) or \
             ws2 = workbook.add_worksheet("コストレポート日別")
             writer.sheets["コストレポート日別"] = ws2
             fmt_center = workbook.add_format({"align": "center", "valign": "vcenter", "border": 1})
-            fmt_date = workbook.add_format({"num_format": "yyyy/m/d", "border": 1, "align": "center"})  # ←統一
+            fmt_date = workbook.add_format({"num_format": "yyyy/m/d", "border": 1, "align": "center"})
             fmt_num = workbook.add_format({"num_format": "#,##0.00", "border": 1})
 
             ws2.merge_range(0, 0, 2, 0, "日付", fmt_center)
