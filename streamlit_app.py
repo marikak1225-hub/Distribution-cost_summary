@@ -250,7 +250,17 @@ if cv_file:
         daily_allocation_df["日付"] = pd.to_datetime(daily_allocation_df["日付"]).dt.floor("D")
         # 媒体名の寄せ（例：LS_Yahoo単体（PSD）→LS_Yahoo単体）
         daily_allocation_df["割り振り"] = daily_allocation_df["割り振り"].apply(_alias_media)
-        daily_allocation_df = daily_allocation_df.sort_values(["日付", "割り振り"]).reset_index(drop=True)
+
+        # ★同じ日付×同じ割り振り×同じ領域で合算（CV集計）
+        # ※領域を無視して日付×割り振りでまとめたい場合は、下記 groupby のキーから "領域" を外してください。
+        daily_allocation_df = (
+            daily_allocation_df
+            .groupby(["日付", "割り振り", "領域"], as_index=False, dropna=False)["合計値"]
+            .sum()
+            .sort_values(["日付", "割り振り"])
+            .reset_index(drop=True)
+        )
+
     except Exception as e:
         st.warning(f"日別シート用データ生成でエラーが発生しました: {e}")
 
@@ -469,7 +479,7 @@ def _build_daily_cost_report_all_range(xls: pd.ExcelFile):
 
     return df_flat, df_flat.copy()
 
-# FIX: コストレポートから「目標」用、日別×割り振りの値を抽出（長さ不一致を解消）
+# コストレポートから「目標」用、日別×割り振りの値を抽出（長さ不一致を解消済み）
 def _build_daily_targets_from_cost(xls: pd.ExcelFile) -> pd.DataFrame:
     """
     「日別」シートの『目標』列に入れるため、
@@ -544,22 +554,21 @@ def _build_daily_targets_from_cost(xls: pd.ExcelFile) -> pd.DataFrame:
             if col_idx >= len(df.columns):
                 continue
 
-            # 必ず同じDataFrameから「日付列と値列」を同時に取り出してから処理（長さ不一致対策）
+            # 同一DFから日付列＆値列を同時に抽出（長さ不一致対策）
             tmp = pd.DataFrame({
                 "_date": _coerce_date_series(df.iloc[:, date_col]),
                 "_val": pd.to_numeric(df.iloc[:, col_idx], errors="coerce"),
             })
-            # 日付がNaTの行だけ除外（値側のNaNは0扱いにしたいので後でfillna(0)）
+            # 日付NaTを除外（値NaNは0に）
             tmp = tmp.dropna(subset=["_date"])
             if tmp.empty:
                 continue
 
-            # 日付を日単位に丸め、値はNaNを0として合計
             tmp["_date"] = pd.to_datetime(tmp["_date"]).dt.floor("D")
             tmp["_val"] = tmp["_val"].fillna(0.0)
             g = tmp.groupby("_date", as_index=True)["_val"].sum()
 
-            # 既存Seriesと加算
+            # 加算
             if label in series_map and not series_map[label].empty:
                 series_map[label] = series_map[label].add(g, fill_value=0.0)
             else:
@@ -577,9 +586,7 @@ def _build_daily_targets_from_cost(xls: pd.ExcelFile) -> pd.DataFrame:
         return pd.DataFrame(columns=["日付", "割り振り", "目標"])
 
     out = pd.DataFrame(rows)
-    # 並び：日付→割り振り
-    out = out.sort_values(["日付", "割り振り"]).reset_index(drop=True)
-    return out
+    return out.sort_values(["日付", "割り振り"]).reset_index(drop=True)
 
 # 実行：日別集計（★全期間で集計・表示★）
 if cost_file:
@@ -775,12 +782,12 @@ if (final_df is not None and len(final_df) > 0) or \
             ws_day = writer.sheets["日別"]
 
             # 書式
-            fmt_date_day = workbook.add_format({"num_format": "yyyy/mm/dd", "align": "center"})
+            fmt_date_day = workbook.add_format({"num_format": "yyyy/m/d", "align": "center"})  # ← yyyy/m/d
             fmt_num_int  = workbook.add_format({"num_format": "#,##0", "align": "right"})
             fmt_num_f2   = workbook.add_format({"num_format": "#,##0.00", "align": "right"})
 
             # 列幅 & 既定フォーマット（A:日付 / B:割り振り / C:領域 / D:合計値 / E:目標）
-            ws_day.set_column(0, 0, 12, fmt_date_day)  # A:日付
+            ws_day.set_column(0, 0, 12, fmt_date_day)  # A:日付（yyyy/m/d）
             ws_day.set_column(1, 1, 24)                # B:割り振り
             ws_day.set_column(2, 2, 16)                # C:領域
             ws_day.set_column(3, 3, 12, fmt_num_int)   # D:合計値（CVは整数想定）
