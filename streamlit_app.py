@@ -10,13 +10,14 @@ from collections import defaultdict
 st.set_page_config(layout="wide")
 st.title("📊 期間中CV・配信費集計")
 
-# 文字列正規化（改行/スペース除去）
+# =====================
+# ユーティリティ
+# =====================
 def _norm_text(x) -> str:
     if x is None:
         return ""
     return str(x).replace("\r", "").replace("\n", "").strip()
 
-# 媒体ラベル寄せ（CV/費用整合を取る）
 MEDIA_ALIAS = {
     "LS_Yahoo単体（PSD）": "LS_Yahoo単体",
 }
@@ -24,7 +25,6 @@ def _alias_media(media: str) -> str:
     m = _norm_text(media)
     return MEDIA_ALIAS.get(m, m)
 
-# 日付列をできるだけ datetime64 に変換（Excelシリアル/文字列/混在に対応）
 def _coerce_date_series(s: pd.Series) -> pd.Series:
     if s is None:
         return pd.Series(dtype="datetime64[ns]")
@@ -34,167 +34,190 @@ def _coerce_date_series(s: pd.Series) -> pd.Series:
     num = pd.to_numeric(s2, errors="coerce")
     num_mask = num.notna()
     if num_mask.any():
-        s2.loc[num_mask] = (pd.to_timedelta(num[num_mask], unit="D") + pd.Timestamp("1899-12-30"))
-    str_mask = ~num_mask
-    if str_mask.any():
-        s2.loc[str_mask] = pd.to_datetime(s2.loc[str_mask], errors="coerce")
+        s2.loc[num_mask] = (
+            pd.to_timedelta(num[num_mask], unit="D")
+            + pd.Timestamp("1899-12-30")
+        )
     s2 = pd.to_datetime(s2, errors="coerce")
     return s2
 
-# Excel列記法 → 0始まりインデックス
 def _excel_col_to_idx(col: str) -> int:
     col = _norm_text(col).upper()
     idx = 0
     for ch in col:
         if "A" <= ch <= "Z":
             idx = idx * 26 + (ord(ch) - ord("A") + 1)
-    return idx - 1  # 0-based
+    return idx - 1
 
-# AFマスタ読込み（B:D、header=1）
-af_path = "AFマスター.xlsx"
-af_df = pd.read_excel(af_path, usecols="B:D", header=1, engine="openpyxl")
+# =====================
+# AFマスタ（Affiliate以外用）
+# =====================
+af_df = pd.read_excel(
+    "AFマスター.xlsx", usecols="B:D", header=1, engine="openpyxl"
+)
 af_df.columns = ["AFコード", "媒体", "分類"]
-# Display除外（CV側はDisplay除外要件維持）
-af_df = af_df[~af_df["分類"].astype(str).str.contains("Display", case=False, na=False)].copy()
+af_df = af_df[
+    ~af_df["分類"].astype(str).str.contains("display", case=False, na=False)
+].copy()
 
+# =====================
 # アップロード
+# =====================
 st.header("📑 CV・配信費集計")
 col1, col2 = st.columns(2)
 with col1:
-    cv_file = st.file_uploader("CVデータ（publicに変更）", type="xlsx", key="cv")
+    cv_file = st.file_uploader("CVデータ", type="xlsx", key="cv")
 with col2:
-    cost_file = st.file_uploader("コストレポート（パスワードなし・必要シート・必要行のみUP）", type="xlsx", key="cost")
+    cost_file = st.file_uploader("コストレポート", type="xlsx", key="cost")
 
-# 期間のデフォルト
+# =====================
+# 期間決定
+# =====================
 default_start = date.today()
 default_end = date.today()
-
-def _safe_minmax_dates_from_cost(file):
-    try:
-        xls = pd.ExcelFile(file)
-        target_sheets = []
-        for s in xls.sheet_names:
-            sl = s.lower()
-            if ("listing" in sl) or ("affiliate" in sl) or ("display" in sl and "nonifrs" not in sl):
-                target_sheets.append(s)
-        all_dates = []
-        for sheet in target_sheets:
-            try:
-                df = pd.read_excel(xls, sheet_name=sheet, engine="openpyxl")
-                used_df = df; used_header_none = False
-            except Exception:
-                used_df = pd.read_excel(xls, sheet_name=sheet, engine="openpyxl", header=None)
-                used_header_none = True
-            sl = sheet.lower()
-            date_col_index = 0 if "affiliate" in sl else 1
-            if date_col_index >= len(used_df.columns):
-                used_df = pd.read_excel(xls, sheet_name=sheet, engine="openpyxl", header=None)
-                if date_col_index >= len(used_df.columns):
-                    continue
-            s_date = _coerce_date_series(used_df.iloc[:, date_col_index]).dropna()
-            if s_date.empty and not used_header_none:
-                used_df2 = pd.read_excel(xls, sheet_name=sheet, engine="openpyxl", header=None)
-                if date_col_index < len(used_df2.columns):
-                    s_date2 = _coerce_date_series(used_df2.iloc[:, date_col_index]).dropna()
-                    if not s_date2.empty:
-                        all_dates.extend(s_date2.tolist())
-                continue
-            all_dates.extend(s_date.tolist())
-        if all_dates:
-            return min(all_dates).date(), max(all_dates).date()
-    except Exception:
-        pass
-    return None
 
 def _safe_minmax_dates_from_cv(file):
     try:
         df = pd.read_excel(file, header=0, engine="openpyxl")
-        dt = pd.to_datetime(df.iloc[:, 0], format="%Y%m%d", errors="coerce").dropna()
+        dt = pd.to_datetime(
+            df.iloc[:, 0], format="%Y%m%d", errors="coerce"
+        ).dropna()
         if len(dt) > 0:
             return dt.min().date(), dt.max().date()
     except Exception:
         pass
     return None
 
-if cost_file:
-    mm = _safe_minmax_dates_from_cost(cost_file)
-    if mm: default_start, default_end = mm
-elif cv_file:
+if cv_file:
     mm = _safe_minmax_dates_from_cv(cv_file)
-    if mm: default_start, default_end = mm
+    if mm:
+        default_start, default_end = mm
 
-# 期間選択
 start_date, end_date = st.date_input(
-    "集計期間を選択👇（※領域別コンディション用集計のみ期間反映）",
-    value=(default_start, default_end)
+    "集計期間",
+    value=(default_start, default_end),
 )
 if start_date > end_date:
-    st.warning("⚠️ 開始日が終了日より後になっています。"); st.stop()
+    st.stop()
 
 days = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days + 1
-st.caption(f"📅 領域別コンディション集計の集計日数：{days}日（{start_date} ～ {end_date}）")
-st.caption("📝 コストレポート日別は、読み込めた全期間でエクスポートします。")
 
-# CV集計（内部）
+# =====================
+# CV集計（★修正箇所）
+# =====================
 cv_result_base = None
-# 日別（A:日付, B:割り振り, C:領域, D:合計値, E:目標）
 daily_allocation_df = None
 
+AFF_KEYS = ("GEN", "AFA", "AFP", "RAA")
+
+def is_affiliate(code: str) -> bool:
+    s = _norm_text(code).upper()
+    return any(k in s for k in AFF_KEYS)
+
 if cv_file:
-    test_df = pd.read_excel(cv_file, header=0, engine="openpyxl")
-    test_df["日付"] = pd.to_datetime(test_df.iloc[:, 0], format="%Y%m%d", errors="coerce")
-    filtered = test_df[(test_df["日付"] >= pd.to_datetime(start_date)) & (test_df["日付"] <= pd.to_datetime(end_date))]
+    df = pd.read_excel(cv_file, header=0, engine="openpyxl")
+    df["日付"] = pd.to_datetime(df.iloc[:, 0], format="%Y%m%d", errors="coerce")
+
+    filtered = df[
+        (df["日付"] >= pd.to_datetime(start_date)) &
+        (df["日付"] <= pd.to_datetime(end_date))
+    ]
 
     mapping = af_df.set_index("AFコード")[["媒体", "分類"]].to_dict("index")
-    ad_codes = test_df.columns[1:]
-    affiliate_prefixes = ["GEN", "AFA", "AFP", "RAA"]
+    ad_codes = df.columns[1:]
 
-    result_list = []
+    rows = []
+
+    # ---- 合計CV ----
     for code in ad_codes:
-        code_str = str(code)
-        if any(code_str.startswith(prefix) for prefix in affiliate_prefixes):
-            media, category = "Affiliate", "Affiliate"
-        elif code_str in mapping:
-            media, category = mapping[code_str]["媒体"], mapping[code_str]["分類"]
+        code_norm = _norm_text(code).upper()
+
+        if is_affiliate(code_norm):
+            media = category = "Affiliate"
+        elif code_norm in mapping:
+            media = mapping[code_norm]["媒体"]
+            category = mapping[code_norm]["分類"]
         else:
             continue
-        if "display" in str(category).lower():
+
+        if "display" in category.lower():
             continue
-        media = _alias_media(media)
-        cv_sum = pd.to_numeric(filtered[code], errors="coerce").fillna(0).sum()
-        result_list.append({"分類": category, "媒体": media, "CV合計": cv_sum})
 
-    if result_list:
-        cv_result_base = (pd.DataFrame(result_list)
-                          .groupby(["分類", "媒体"], as_index=False)["CV合計"].sum())
-        cv_result_base["CV日割り"] = (cv_result_base["CV合計"] / days).round(2)
-        cv_result_base = cv_result_base.sort_values(["分類", "媒体"]).reset_index(drop=True)
-
-    # 日別：期間適用 & CV>0 & AFマスタ一致
-    try:
-        cv_long = filtered.melt(id_vars=["日付"], var_name="コード", value_name="CV")
-        cv_long["CV"] = pd.to_numeric(cv_long["CV"], errors="coerce").fillna(0)
-        cv_long = cv_long[cv_long["CV"] > 0].copy()
-
-        af_min = af_df[["AFコード", "媒体", "分類"]].copy()
-        merged = cv_long.merge(af_min, left_on="コード", right_on="AFコード", how="left")
-        merged = merged.dropna(subset=["AFコード"])
-
-        daily_allocation_df = merged[["日付", "媒体", "分類", "CV"]].copy()
-        daily_allocation_df.rename(columns={"媒体": "割り振り", "分類": "領域", "CV": "合計値"}, inplace=True)
-        daily_allocation_df["日付"] = pd.to_datetime(daily_allocation_df["日付"]).dt.floor("D")
-        daily_allocation_df["割り振り"] = daily_allocation_df["割り振り"].apply(_alias_media)
-
-        # ★同じ日付×同じ割り振りで合算（領域は代表値 first）
-        daily_allocation_df = (
-            daily_allocation_df
-            .groupby(["日付", "割り振り"], as_index=False, dropna=False)
-            .agg(領域=("領域", "first"), 合計値=("合計値", "sum"))
-            .sort_values(["日付", "割り振り"])
-            .reset_index(drop=True)
+        cv_sum = (
+            pd.to_numeric(filtered[code], errors="coerce")
+            .fillna(0).sum()
         )
-    except Exception as e:
-        st.warning(f"日別シート用データ生成でエラーが発生しました: {e}")
+
+        rows.append({
+            "分類": category,
+            "媒体": _alias_media(media),
+            "CV合計": cv_sum
+        })
+
+    if rows:
+        cv_result_base = (
+            pd.DataFrame(rows)
+            .groupby(["分類", "媒体"], as_index=False)["CV合計"]
+            .sum()
+        )
+        cv_result_base["CV日割り"] = (
+            cv_result_base["CV合計"] / days
+        ).round(2)
+
+    # ---- 日別CV ----
+    cv_long = filtered.melt(
+        id_vars=["日付"], var_name="コード", value_name="CV"
+    )
+    cv_long["CV"] = pd.to_numeric(
+        cv_long["CV"], errors="coerce"
+    ).fillna(0)
+    cv_long = cv_long[cv_long["CV"] > 0].copy()
+
+    cv_long["コード_norm"] = cv_long["コード"].apply(
+        lambda x: _norm_text(x).upper()
+    )
+
+    aff = cv_long[cv_long["コード_norm"].apply(is_affiliate)].copy()
+    aff["媒体"] = "Affiliate"
+    aff["分類"] = "Affiliate"
+
+    lst = cv_long[
+        ~cv_long["コード_norm"].apply(is_affiliate)
+    ].merge(
+        af_df[["AFコード", "媒体", "分類"]],
+        left_on="コード_norm",
+        right_on="AFコード",
+        how="inner",
+    )
+
+    merged = pd.concat([aff, lst], ignore_index=True)
+    merged = merged[
+        ~merged["分類"].astype(str).str.contains("display", case=False, na=False)
+    ]
+
+    daily_allocation_df = (
+        merged[["日付", "媒体", "分類", "CV"]]
+        .rename(columns={
+            "媒体": "割り振り",
+            "分類": "領域",
+            "CV": "合計値",
+        })
+    )
+
+    daily_allocation_df["日付"] = (
+        pd.to_datetime(daily_allocation_df["日付"]).dt.floor("D")
+    )
+    daily_allocation_df["割り振り"] = (
+        daily_allocation_df["割り振り"].apply(_alias_media)
+    )
+
+    daily_allocation_df = (
+        daily_allocation_df
+        .groupby(["日付", "割り振り"], as_index=False)
+        .agg(領域=("領域", "first"), 合計値=("合計値", "sum"))
+        .sort_values(["日付", "割り振り"])
+        .reset_index(drop=True)
+    )
 
 # コスト集計（期間適用：領域別コンディション用）
 cost_summary = {
